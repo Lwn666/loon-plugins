@@ -1,16 +1,25 @@
 #!name=微信小程序会员商城签到
-#!desc=zsvip.xomitoto.com 微信小程序每日自动签到。\n打开小程序时自动续期凭证，每天定时签到并推送通知。
+#!desc=zsvip.xomitoto.com 微信小程序每日自动签到。打开小程序自动续期凭证，定时签到并推送结果。
 #!author=Minis
+#!homepage=https://github.com/Lwn666/loon-plugins/tree/main/wechat-signin
 #!icon=https://is1-ssl.mzstatic.com/image/thumb/Purple221/v4/97/40/5e/97405e49-87bb-3f0a-bf3a-91cf8fdf99a0/AppIcon-0-0-1x_U007epad-0-1-0-0-sRGB-GLES2_U002c0-85-220.png/144x144.png
+#!category=Sign
 #!tag=签到,微信
-#!loon_version = 3.5.1(978)
-#!arguments-desc=- 凭证自动捕获: 打开小程序时自动截获最新 third-session 并持久存储，强烈建议保持开启 \n\n- CRONEXP: 定时签到时间，默认每天 08:00，可自行配置如 "30 9 * * *" \n\n- DEBUG: 开启后控制台输出详细日志 \n\n- TIMEOUT: 脚本超时时间，默认 30 秒
+# ==================== 使用说明 ====================
+# 1. 首次使用: 安装插件后用微信打开一次目标小程序任意页面，
+#    会弹出「签到凭证已更新」通知，表示凭证捕获成功
+# 2. 之后每天按 CRONEXP 设定的时间自动签到并推送结果
+# 3. 凭证(session)过期时收到「凭证已失效」通知，
+#    再打开一次小程序即可自动续期，无需其他操作
+# 4. CAPTURE_ENABLE 建议保持开启，关闭后将无法自动续期
+# 5. DEBUG 开启后在 Loon 日志页输出详细请求信息
+# 更新时间: 2026-08-22
 
 [Argument]
-CAPTURE_ENABLE=switch,true,tag=凭证自动捕获,desc=打开小程序时自动更新签到凭证
-CRONEXP=input,0 8 * * *,tag=CRONEXP,desc=默认每天08:00执行,建议自行配置
-DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
-TIMEOUT=input,30,type=number,tag=脚本超时秒数,desc=TIMEOUT
+CAPTURE_ENABLE=switch,true,tag=[开关] 凭证自动捕获,desc=打开小程序时自动更新签到凭证,建议保持开启
+CRONEXP=input,0 8 * * *,tag=自定义执行时间,desc=默认每天08:00执行,可自行更改如 30 9 * * *
+DEBUG=switch,false,tag=[开关] 调试模式,desc=开启后输出详细日志
+TIMEOUT=input,30,type=number,tag=脚本超时秒数,desc=脚本执行超时时间
 
 [General]
 
@@ -20,15 +29,15 @@ TIMEOUT=input,30,type=number,tag=脚本超时秒数,desc=TIMEOUT
 
 [Host]
 
-[Mitm]
-hostname = zsvip.xomitoto.com
-
 [Script]
-# 凭证捕获：小程序任意请求头中截获最新 third-session/userId
-http-request ^https?:\/\/zsvip\.xomitoto\.com script-path=capture.js,tag=签到凭证捕获,requires-body=false,timeout=10,enable={CAPTURE_ENABLE},argument=[{DEBUG}]
+# 凭证捕获：小程序任意请求头中截获最新 third-session/userId/app-id 写入持久存储
+http-request ^https?:\/\/zsvip\.xomitoto\.com script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/capture.js,tag=签到凭证捕获,requires-body=false,timeout=10,enable={CAPTURE_ENABLE},argument=[{DEBUG}]
 
 # 定时签到（cron 表达式来自参数）
-cron {CRONEXP} script-path=signin.js,tag=微信自动签到,timeout={TIMEOUT},enable=true,argument=[{DEBUG}]
+cron {CRONEXP} script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=会员商城自动签到,timeout={TIMEOUT},enable=true,argument=[{DEBUG}]
 
-# 手动触发（Loon App 内点击执行）
-generic script-path=signin.js,tag=手动签到,timeout={TIMEOUT},enable=true,argument=[{DEBUG}]
+# 手动触发（Loon 插件页点击执行）
+generic script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=会员商城手动签到,timeout={TIMEOUT},enable=true,argument=[{DEBUG}]
+
+[MITM]
+hostname = zsvip.xomitoto.com
