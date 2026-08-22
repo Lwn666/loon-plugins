@@ -17,9 +17,12 @@ const ARGS = (function () {
     return { debug: $argument.DEBUG === true || $argument.DEBUG === "true" };
 })();
 
+function debugLog(msg) {
+    if (ARGS.debug) console.log("[zs-signin] " + msg);
+}
+
 (function () {
     const headers = $request.headers;
-    // header 名大小写不敏感处理
     const h = {};
     for (const k in headers) h[k.toLowerCase()] = headers[k];
 
@@ -34,26 +37,48 @@ const ARGS = (function () {
 
     const oldSession = $persistentStore.read(KEY_SESSION);
     const oldUser = $persistentStore.read(KEY_USERID);
+    const oldAppId = $persistentStore.read(KEY_APPID);
     const now = new Date().toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" });
 
     const sessionChanged = session !== oldSession;
     const userChanged = userId && userId !== oldUser;
+    const appIdChanged = appId && appId !== oldAppId;
 
-    if (sessionChanged || userChanged) {
+    debugLog("捕获请求: " + $request.url);
+    debugLog("sessionChanged=" + sessionChanged + " userChanged=" + userChanged + " appIdChanged=" + appIdChanged);
+    debugLog("当前 userId=" + (userId || "无") + " 旧 userId=" + (oldUser || "无"));
+
+    // 只要 session 变了就写 session、时间
+    if (sessionChanged) {
         $persistentStore.write(session, KEY_SESSION);
-        if (userId) $persistentStore.write(userId, KEY_USERID);
         $persistentStore.write(now, KEY_TIME);
-        console.log("[zs-signin] 捕获新 session: " + session.substring(0, 8) + "... userId: " + (userId || oldUser || "未知"));
-        $notification.post("签到凭证已更新", "session 已自动续期", "时间: " + now, "");
-    } else {
-        if (ARGS.debug) console.log("[zs-signin] session 未变化，跳过写入");
+        debugLog("写入新 session: " + session.substring(0, 8) + "...");
     }
 
-    // app-id 单独维护（变更频率低）
-    const oldAppId = $persistentStore.read(KEY_APPID);
-    if (appId && appId !== oldAppId) {
+    // 当前请求带 userId 且变了才写
+    if (userChanged) {
+        $persistentStore.write(userId, KEY_USERID);
+        debugLog("写入新 userId: " + userId);
+    }
+
+    // app-id 单独维护
+    if (appIdChanged) {
         $persistentStore.write(appId, KEY_APPID);
-        if (ARGS.debug) console.log("[zs-signin] 捕获 app-id: " + appId);
+        debugLog("写入新 app-id: " + appId);
+    }
+
+    // 只有三件套都在持久存储里才算真正成功并推送
+    const hasSession = $persistentStore.read(KEY_SESSION);
+    const hasUserId = $persistentStore.read(KEY_USERID);
+    const hasAppId = $persistentStore.read(KEY_APPID);
+
+    if (hasSession && hasUserId && hasAppId) {
+        if (sessionChanged || userChanged || appIdChanged) {
+            console.log("[zs-signin] 凭证完整: session=" + hasSession.substring(0, 8) + "... userId=" + hasUserId + " appId=" + hasAppId);
+            $notification.post("签到凭证已更新 ✅", "三件套已就绪", "session/userId/app-id 均已捕获", "");
+        }
+    } else {
+        debugLog("凭证尚不完整: session=" + (hasSession ? "有" : "无") + " userId=" + (hasUserId ? "有" : "无") + " appId=" + (hasAppId ? "有" : "无"));
     }
 
     $done({});
