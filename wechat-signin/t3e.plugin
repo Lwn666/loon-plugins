@@ -1,0 +1,16 @@
+#!name=微信签到-测试3e: generic脚本
+#!desc=测试 generic 脚本类型
+#!author=Minis
+
+[Argument]
+CRONEXP=input,"0 8 * * *",tag=执行时间
+DEBUG=switch,false,tag=调试
+TIMEOUT=input,30,type=number,tag=超时
+
+[Script]
+cron {CRONEXP} script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=自动签到,timeout={TIMEOUT},enable=true,argument=[{DEBUG}]
+
+generic script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=手动签到,timeout={TIMEOUT},enable=true,argument=[{DEBUG}]
+
+[MITM]
+hostname = zsvip.xomitoto.com
