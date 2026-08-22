@@ -1,0 +1,12 @@
+#!name=微信签到-测试1: 仅参数无替换
+#!desc=测试 [Argument] section + 固定 cron
+#!author=Minis
+
+[Argument]
+CRONEXP=input,"0 8 * * *",tag=执行时间
+
+[Script]
+cron "0 8 * * *" script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=微信签到,timeout=30,enable=true
+
+[MITM]
+hostname = zsvip.xomitoto.com
