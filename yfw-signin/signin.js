@@ -1,16 +1,14 @@
 /*
  * 药房网自动签到脚本 (cron 通用)
  * 域名: m.yaofangwang.com
- * 凭证来源: $persistentStore（由 capture.js 在打开签到页时自动捕获 token/Cookie/accountId）
- * 流程: 读凭证 → GET /customer/SignNew → 推送结果
+ * 凭证来源: $persistentStore（由 capture.js 捕获 ASP.NET_SessionId）
+ * 流程: 读 SessionId → GET /customer/SignNew → 推送结果
 */
 
 const HOST = "https://m.yaofangwang.com";
 const SIGNIN_PATH = "/customer/SignNew";
 
-const KEY_TOKEN = "yfw_token";
 const KEY_COOKIE = "yfw_cookie";
-const KEY_ACCOUNTID = "yfw_accountid";
 const KEY_TIME = "yfw_capture_time";
 
 const ARGS = (function () {
@@ -20,8 +18,7 @@ const ARGS = (function () {
     return { debug: $argument.DEBUG === true || $argument.DEBUG === "true" };
 })();
 
-function buildHeaders(token, cookie, accountId) {
-    const ts = Date.now();
+function buildHeaders(sessionId) {
     return {
         "Host": "m.yaofangwang.com",
         "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -30,7 +27,7 @@ function buildHeaders(token, cookie, accountId) {
         "Accept-Encoding": "gzip, deflate, br",
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
         "Referer": "https://m.yaofangwang.com/customer/sign_ios.html?source=iosapp",
-        "Cookie": cookie,
+        "Cookie": sessionId,
         "Connection": "keep-alive"
     };
 }
@@ -51,25 +48,22 @@ function debugLog(msg) {
 function finish() { $done(); }
 
 (function () {
-    const token = $persistentStore.read(KEY_TOKEN);
-    const cookie = $persistentStore.read(KEY_COOKIE);
-    const accountId = $persistentStore.read(KEY_ACCOUNTID);
+    const sessionId = $persistentStore.read(KEY_COOKIE);
     const capTime = $persistentStore.read(KEY_TIME);
 
-    if (!token || !cookie || !accountId) {
-        notify("凭证未就绪", "缺少 " + (!token ? "token" : !cookie ? "Cookie" : "accountId"),
+    if (!sessionId) {
+        notify("凭证未就绪", "缺少 ASP.NET_SessionId",
             "请先用药房网 App/H5 打开签到页面，再重试签到");
         return finish();
     }
 
-    console.log("token: " + token.substring(0, 16) + "... accountId: " + accountId +
+    console.log("SessionId: " + sessionId.substring(0, 32) + "..." +
         (capTime ? " (捕获于 " + capTime + ")" : ""));
     debugLog("DEBUG 模式已开启");
 
-    // 执行签到
     req({
-        url: HOST + SIGNIN_PATH + "?accountid=" + accountId + "&_=" + Date.now(),
-        headers: buildHeaders(token, cookie, accountId),
+        url: HOST + SIGNIN_PATH + "?_=" + Date.now(),
+        headers: buildHeaders(sessionId),
         timeout: 15000
     }, function (err, resp, data) {
         if (err) { notify("签到失败", "网络错误", String(err)); return finish(); }
@@ -81,7 +75,7 @@ function finish() { $done(); }
         }
 
         if (info.code !== 1) {
-            notify("⚠️ 签到失败/凭证失效", "code: " + info.code, info.msg || "请重新打开签到页面刷新凭证");
+            notify("⚠️ 签到失败/凭证失效", "code: " + info.code, info.msg || "请重新打开签到页面刷新 SessionId");
             return finish();
         }
 
