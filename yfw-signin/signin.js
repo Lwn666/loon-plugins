@@ -74,6 +74,11 @@ function finish() { $done(); }
             return finish();
         }
 
+        // code: 1=签到成功, -1=已签到(正常), 其他=失败/凭证失效
+        if (info.code === -1 && info.msg && info.msg.includes("已签到")) {
+            notify("今日已签到 ✅", "无需重复签到", info.msg);
+            return finish();
+        }
         if (info.code !== 1) {
             notify("⚠️ 签到失败/凭证失效", "code: " + info.code, info.msg || "请重新打开签到页面刷新 SessionId");
             return finish();
