@@ -1,0 +1,15 @@
+#!name=微信签到-测试4: enable开关控制
+#!desc=测试 enable={SWITCH} 语法
+#!author=Minis
+
+[Argument]
+CRONEXP=input,"0 8 * * *",tag=执行时间
+CAPTURE_ENABLE=switch,true,tag=捕获开关
+
+[Script]
+http-request ^https?:\/\/zsvip\.xomitoto\.com script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/capture.js,tag=捕获,timeout=10,enable={CAPTURE_ENABLE}
+
+cron {CRONEXP} script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=自动签到,timeout=30,enable=true
+
+[MITM]
+hostname = zsvip.xomitoto.com
