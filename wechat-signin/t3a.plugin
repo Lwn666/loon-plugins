@@ -1,0 +1,13 @@
+#!name=微信签到-测试3a: 仅加DEBUG参数无替换
+#!desc=测试 switch 参数不替换
+#!author=Minis
+
+[Argument]
+CRONEXP=input,"0 8 * * *",tag=执行时间
+DEBUG=switch,false,tag=调试
+
+[Script]
+cron {CRONEXP} script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=微信签到,timeout=30,enable=true
+
+[MITM]
+hostname = zsvip.xomitoto.com
