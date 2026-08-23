@@ -1,0 +1,19 @@
+#!name = 微电影付费墙解锁
+#!desc = 解密微电影小程序(垂云通天河等)付费视频，旁路提取完整视频合成片段URL。AES-128-CBC(key=7749174464527483)已实测验证。
+#!author = Minis
+#!homepage = https://github.com/
+#!system = iOS
+#!system_version = 15
+#!loon_version = 3.5.1(978)
+#!tag = 视频,解锁,破解
+#!type = normal
+
+[Argument]
+NOTIFY = switch,true,tag=解锁通知,desc=解密到完整视频片段时推送通知
+DEBUG = switch,false,tag=调试模式,desc=开启后输出详细日志
+
+[Script]
+http-response ^https:\/\/microfilm\.good-wesee\.com:46735\/ script-path=http://192.168.31.2:8897/paywall-unlock.js,requires-body=true,tag=付费墙解密,timeout=30,enable=true
+
+[Mitm]
+hostname = microfilm.good-wesee.com
