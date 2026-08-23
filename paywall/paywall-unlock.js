@@ -80,10 +80,24 @@ function bytesToUtf8(bytes) {
   return str;
 }
 function base64ToBytes(b64) {
-  var bin = atob(b64);
-  var bytes = new Uint8Array(bin.length);
-  for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
+  var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  var lookup = new Array(256);
+  for (var i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
+  b64 = b64.replace(/[\r\n\s]+/g, "").replace(/=+$/, "");
+  var len = b64.length;
+  var out = [];
+  var buffer = 0, bits = 0;
+  for (var i = 0; i < len; i++) {
+    var val = lookup[b64.charCodeAt(i)];
+    if (val === undefined) continue;
+    buffer = (buffer << 6) | val;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buffer >> bits) & 0xff);
+    }
+  }
+  return new Uint8Array(out);
 }
 function decryptBody(b64Text) {
   var raw = base64ToBytes(b64Text);
@@ -112,6 +126,7 @@ try {
     if (typeof body === "string" && body.length > 32) {
       var plain = decryptBody(body);
       if (plain && plain.trim().length > 0) {
+        console.log("[paywall] 解密成功 len=" + plain.length);
         var url = $request.url;
         if (DEBUG) console.log("[paywall] 解密成功 " + url);
 
@@ -186,5 +201,6 @@ try {
   }
 } catch (e) {
   console.log("[paywall] 异常: " + e);
+  console.log("[paywall] 异常堆栈: " + (e.stack || "无"));
   $done({});
 }
