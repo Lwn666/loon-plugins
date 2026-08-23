@@ -184,9 +184,6 @@ try {
               expLines.push("ProjectId: " + projectId);
               expLines.push("完整时长: " + (duration/1000).toFixed(2) + "s (片段" + segs.length + "个)");
               expLines.push("");
-              expLines.push("--- 片段 URL ---");
-              segs.forEach(function (s, i) { expLines.push((i+1) + ". [" + s.type + "] " + s.dur + "ms"); expLines.push("   " + s.url); });
-              expLines.push("");
               expLines.push("--- 一键下载+拼合 ---");
               segs.forEach(function (s, i) { expLines.push('curl -o ' + pad2(i) + '.mp4 "' + s.url + '"'); });
               var concatLines = "";
