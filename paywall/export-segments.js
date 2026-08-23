@@ -45,9 +45,6 @@ try {
 
       var fullText = lines.join("\n");
 
-      // 复制到剪贴板
-      try { $clipboard.text = fullText; } catch (e) { console.log("[export] 剪贴板失败: " + e); }
-
       console.log("[export] === 片段导出开始 ===");
       console.log(fullText);
       console.log("[export] === 片段导出结束 ===");
@@ -55,7 +52,7 @@ try {
       $notification.post(
         "🎬 片段已导出",
         name,
-        "已复制 " + segs.length + " 个片段 URL 和 ffmpeg 命令到剪贴板",
+        segs.length + " 个片段 URL 已输出到脚本日志\n请到 Loon → 脚本 → 日志 中复制",
         ""
       );
       $done({});
