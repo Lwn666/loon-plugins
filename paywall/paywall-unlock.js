@@ -186,6 +186,13 @@ try {
               expLines.push("ProjectId: " + projectId);
               expLines.push("完整时长: " + (duration/1000).toFixed(2) + "s (片段" + segs.length + "个)");
               expLines.push("");
+              expLines.push("--- 预览版(试看)下载 ---");
+              if (preview) {
+                expLines.push("curl -o preview.mp4 \"" + preview + "\"");
+              } else {
+                expLines.push("(无预览地址)");
+              }
+              expLines.push("");
               expLines.push("--- 一键下载+拼合 ---");
               segs.forEach(function (s, i) { expLines.push('curl -o ' + pad2(i) + '.mp4 "' + s.url + '"'); });
               var concatLines = "";
