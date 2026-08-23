@@ -178,9 +178,11 @@ try {
 
               // 生成导出内容（curl 下载 + ffmpeg 拼合命令）
               function pad2(n) { return (n < 10 ? "0" : "") + n; }
+              // 从明文提取视频名（activityName 优先，缺省用 templateName）
+              var nameFromPlain = getField(plain, "activityName") || getField(plain, "templateName") || "";
               var expLines = [];
               expLines.push("===== 片段导出开始 =====");
-              expLines.push("视频: " + (activityName || projectId));
+              expLines.push("视频: " + (nameFromPlain || activityName || projectId));
               expLines.push("ProjectId: " + projectId);
               expLines.push("完整时长: " + (duration/1000).toFixed(2) + "s (片段" + segs.length + "个)");
               expLines.push("");
