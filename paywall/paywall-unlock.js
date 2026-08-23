@@ -175,7 +175,29 @@ try {
               $persistentStore.write(JSON.stringify(payload), "paywall_detail_" + projectId);
               $persistentStore.write(projectId, "paywall_last_project");
               var total = segs.reduce(function (a, b) { return a + (b.dur || 0); }, 0);
-              $notification.post("🎬 完整视频已解锁", activityName || "视频详情", "共 " + segs.length + " 个片段\nProjectId: " + projectId + "\n完整时长 " + (duration/1000).toFixed(2) + "s", "");
+
+              // 生成导出内容（curl 下载 + ffmpeg 拼合命令）
+              function pad2(n) { return (n < 10 ? "0" : "") + n; }
+              var expLines = [];
+              expLines.push("===== 片段导出开始 =====");
+              expLines.push("视频: " + (activityName || projectId));
+              expLines.push("ProjectId: " + projectId);
+              expLines.push("完整时长: " + (duration/1000).toFixed(2) + "s (片段" + segs.length + "个)");
+              expLines.push("");
+              expLines.push("--- 片段 URL ---");
+              segs.forEach(function (s, i) { expLines.push((i+1) + ". [" + s.type + "] " + s.dur + "ms"); expLines.push("   " + s.url); });
+              expLines.push("");
+              expLines.push("--- 一键下载+拼合 ---");
+              segs.forEach(function (s, i) { expLines.push('curl -o ' + pad2(i) + '.mp4 "' + s.url + '"'); });
+              var concatLines = "";
+              segs.forEach(function (s, i) { concatLines += "file '" + pad2(i) + ".mp4'\n"; });
+              expLines.push('printf "' + concatLines + '" > concat.txt');
+              expLines.push("ffmpeg -y -f concat -safe 0 -i concat.txt -c copy full_video.mp4");
+              expLines.push("===== 片段导出结束 =====");
+              var exportText = expLines.join("\n");
+
+              console.log(exportText);
+              $notification.post("🎬 完整视频已解锁", activityName || "视频详情", "共 " + segs.length + " 个片段\nProjectId: " + projectId + "\n完整时长 " + (duration/1000).toFixed(2) + "s\n\n片段URL已输出到日志", "");
               console.log("[paywall] ✅ 通知已推送");
             } else {
               console.log("[paywall] ⚠️ 片段数为0");
