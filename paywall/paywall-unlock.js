@@ -118,34 +118,49 @@ function getField(plain, key) {
 }
 
 // ==================== 主逻辑 ====================
+function bodyToString(body) {
+  // Loon 的 $response.body 可能是 string 或 Uint8Array
+  if (typeof body === "string") return body;
+  if (body instanceof Uint8Array || (body && typeof body.length === "number" && typeof body.byteLength === "number")) {
+    var bin = "";
+    for (var i = 0; i < body.length; i++) bin += String.fromCharCode(body[i]);
+    return bin;
+  }
+  if (body && typeof body === "object" && body.constructor && body.constructor.name === "Uint8Array") {
+    var b2 = "";
+    for (var j = 0; j < body.length; j++) b2 += String.fromCharCode(body[j]);
+    return b2;
+  }
+  return String(body || "");
+}
+
 try {
+  console.log("[paywall] 脚本启动, url=" + $request.url);
   if (!/microfilm\.good-wesee\.com/.test($request.url)) {
+    console.log("[paywall] URL 不匹配，跳过");
     $done({});
   } else {
     var body = $response.body;
-    if (typeof body === "string" && body.length > 32) {
-      var plain = decryptBody(body);
+    console.log("[paywall] body 类型: " + (body === undefined ? "undefined" : body === null ? "null" : Object.prototype.toString.call(body)) + ", 长度: " + (body ? (body.length || body.byteLength || 0) : 0));
+
+    var bodyStr = bodyToString(body);
+    console.log("[paywall] body 转 string 后长度: " + bodyStr.length + ", 前30字符: " + bodyStr.substring(0, 30));
+
+    if (bodyStr.length > 32) {
+      var plain = decryptBody(bodyStr);
       if (plain && plain.trim().length > 0) {
         console.log("[paywall] 解密成功 len=" + plain.length);
         var url = $request.url;
-        if (DEBUG) console.log("[paywall] 解密成功 " + url);
 
-        // 详情接口 /mediayong/{ProjectId}：提取片段
         if (/\/mediayong\//.test(url)) {
           try {
-            // 用正则提取 MediaDetails 里的片段（不依赖完整JSON）
             var segRe = /"VideoType"\s*:\s*"(\w+)"[^{}]*?"VideoDuration"\s*:\s*(\d+)/g;
             var urlRe = /"(VideoUrl_OSS|VideoPath_COS)"\s*:\s*"([^"]+)"/g;
-
-            var types = [], durs = [], urls = [];
-            var m;
+            var types = [], durs = [], urls = [], m;
             while ((m = segRe.exec(plain)) !== null) { types.push(m[1]); durs.push(parseInt(m[2], 10)); }
             while ((m = urlRe.exec(plain)) !== null) { urls.push({ kind: m[1], url: m[2] }); }
-
             var segs = [];
-            for (var i = 0; i < urls.length; i++) {
-              segs.push({ type: types[i] || "?", dur: durs[i] || 0, url: urls[i].url });
-            }
+            for (var i = 0; i < urls.length; i++) segs.push({ type: types[i] || "?", dur: durs[i] || 0, url: urls[i].url });
 
             var projectId = getField(plain, "ProjectId") || url.replace(/.*\//, "");
             var activityName = getField(plain, "activityName") || "";
@@ -153,49 +168,42 @@ try {
             var durationCut = getField(plain, "duration_cut") || 0;
             var preview = getField(plain, "MediaURLPreview") || "";
 
+            console.log("[paywall] 片段数=" + segs.length + " ProjectId=" + projectId);
+
             if (segs.length > 0) {
-              var payload = {
-                projectId: projectId,
-                activityName: activityName,
-                duration: duration,
-                durationCut: durationCut,
-                preview: preview,
-                segments: segs
-              };
+              var payload = { projectId: projectId, activityName: activityName, duration: duration, durationCut: durationCut, preview: preview, segments: segs };
               $persistentStore.write(JSON.stringify(payload), "paywall_detail_" + projectId);
               $persistentStore.write(projectId, "paywall_last_project");
               var total = segs.reduce(function (a, b) { return a + (b.dur || 0); }, 0);
-              $notification.post(
-                "🎬 完整视频已解锁",
-                activityName || "视频详情",
-                "共 " + segs.length + " 个片段\nProjectId: " + projectId + "\n完整时长 " + (duration/1000).toFixed(2) + "s",
-                ""
-              );
-              if (DEBUG) console.log("[paywall] " + JSON.stringify(payload));
+              $notification.post("🎬 完整视频已解锁", activityName || "视频详情", "共 " + segs.length + " 个片段\nProjectId: " + projectId + "\n完整时长 " + (duration/1000).toFixed(2) + "s", "");
+              console.log("[paywall] ✅ 通知已推送");
+            } else {
+              console.log("[paywall] ⚠️ 片段数为0");
             }
           } catch (e) {
-            if (DEBUG) console.log("[paywall] 详情解析失败 " + e);
+            console.log("[paywall] 详情解析失败 " + e);
           }
         }
-        // 列表接口 /mediauyong/{userId}
         else if (/\/mediauyong\//.test(url)) {
           try {
             var cnt = (plain.match(/"recordId"/g) || []).length;
+            console.log("[paywall] 列表记录数=" + cnt);
             if (cnt > 0) {
               var recRe = /"recordId"\s*:\s*(\d+)[^{}]*?"ProjectId"\s*:\s*"([^"]+)"/g;
-              var list = [];
-              var m;
-              while ((m = recRe.exec(plain)) !== null) {
-                list.push({ recordId: parseInt(m[1], 10), projectId: m[2] });
-              }
+              var list = [], mm;
+              while ((mm = recRe.exec(plain)) !== null) list.push({ recordId: parseInt(mm[1], 10), projectId: mm[2] });
               $persistentStore.write(JSON.stringify(list), "paywall_list");
-              if (DEBUG) console.log("[paywall] 列表 " + list.length + " 条");
+              console.log("[paywall] ✅ 列表已存 " + list.length + " 条");
             }
           } catch (e) {
-            if (DEBUG) console.log("[paywall] 列表解析失败 " + e);
+            console.log("[paywall] 列表解析失败 " + e);
           }
         }
+      } else {
+        console.log("[paywall] ⚠️ 解密失败或明文为空");
       }
+    } else {
+      console.log("[paywall] ⚠️ body 长度不足 32");
     }
     $done({});
   }
