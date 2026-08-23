@@ -14,7 +14,6 @@ DEBUG = switch,false,tag=调试模式,desc=开启后输出详细日志
 
 [Script]
 http-response ^https:\/\/microfilm\.good-wesee\.com:46735\/ script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/paywall/paywall-unlock.js,requires-body=true,tag=付费墙解密,timeout=30,enable=true
-generic script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/paywall/export-segments.js,tag=导出片段URL,img-url=square.and.arrow.up,timeout=30,enable=true
 
 [Mitm]
 hostname = microfilm.good-wesee.com
