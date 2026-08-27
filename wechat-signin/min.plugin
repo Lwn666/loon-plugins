@@ -1,9 +1,0 @@
-#!name=微信签到-最小测试版
-#!desc=极简结构用于闪退排查。若此版可正常导入而正式版闪退，说明问题出在某个高级语法上。
-#!author=Minis
-
-[Script]
-cron "0 8 * * *" script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/wechat-signin/signin.js,tag=微信签到,timeout=30,enable=true
-
-[MITM]
-hostname = zsvip.xomitoto.com
