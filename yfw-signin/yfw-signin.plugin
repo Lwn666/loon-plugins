@@ -4,6 +4,7 @@
 #!homepage=https://github.com/Lwn666/loon-plugins/tree/main/yfw-signin
 #!icon=https://m.yaofangwang.com/favicon.ico
 #!category=Sign
+#!loon_version=3.5.1(983)
 
 [Argument]
 CAPTURE_ENABLE=switch,true,tag=凭证自动捕获,desc=打开药房网页面时自动更新签到凭证
