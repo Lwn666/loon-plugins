@@ -13,7 +13,7 @@ NOTIFY = switch,true,tag=解锁通知,desc=解密到完整视频片段时推送�
 DEBUG = switch,false,tag=调试模式,desc=开启后输出详细日志
 
 [Script]
-http-response ^https:\/\/microfilm\.good-wesee\.com:46735\/ script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/paywall/paywall-unlock.js,requires-body=true,tag=付费墙解密,timeout=30,enable=true
+response if ${url} ~= /^https:\/\/microfilm\.good-wesee\.com:46735\//i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/paywall/paywall-unlock.js") with requires_body=true, tag="付费墙解密", timeout=30, enable=true
 
 [Mitm]
 hostname = microfilm.good-wesee.com
