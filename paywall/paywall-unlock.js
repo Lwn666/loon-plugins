@@ -55,7 +55,38 @@ function aesCbcDecrypt(keyBytes,ivBytes,ctBytes){
 
 
 var AES_KEY = "7749174464527483";
-var DEBUG = false;
+
+// 读取插件参数（兼容对象 / JSON 字符串 / 逗号分隔三种形式）
+var ARGS = (function () {
+  var raw = typeof $argument === "undefined" ? null : $argument;
+  if (raw === null || raw === undefined || raw === "") return {};
+  if (typeof raw === "string") {
+    var s = raw.trim();
+    if (s.charAt(0) === "{") { try { return JSON.parse(s); } catch (e) {} }
+    // 逗号分隔：按 Argument 声明顺序 NOTIFY,DEBUG
+    var parts = s.split(",");
+    return { NOTIFY: parts[0], DEBUG: parts[1] };
+  }
+  if (typeof raw === "object") {
+    if (raw.length !== undefined) return { NOTIFY: raw[0], DEBUG: raw[1] };
+    return raw;
+  }
+  return {};
+})();
+
+function argBool(name, def) {
+  var v = ARGS[name];
+  if (v === undefined || v === null || v === "") return def;
+  var s = String(v).toLowerCase();
+  return s === "true" || s === "1" || s === "yes";
+}
+
+var DEBUG = argBool("DEBUG", false);
+var NOTIFY = argBool("NOTIFY", true);
+
+function dbg(msg) {
+  if (DEBUG) console.log("[paywall] " + msg);
+}
 
 function utf8ToBytes(str) {
   var bytes = [];
@@ -135,21 +166,21 @@ function bodyToString(body) {
 }
 
 try {
-  console.log("[paywall] 脚本启动, url=" + $request.url);
+  dbg("脚本启动, url=" + $request.url);
   if (!/microfilm\.good-wesee\.com/.test($request.url)) {
-    console.log("[paywall] URL 不匹配，跳过");
+    dbg("URL 不匹配，跳过");
     $done({});
   } else {
     var body = $response.body;
-    console.log("[paywall] body 类型: " + (body === undefined ? "undefined" : body === null ? "null" : Object.prototype.toString.call(body)) + ", 长度: " + (body ? (body.length || body.byteLength || 0) : 0));
+    dbg("body 类型: " + (body === undefined ? "undefined" : body === null ? "null" : Object.prototype.toString.call(body)) + ", 长度: " + (body ? (body.length || body.byteLength || 0) : 0));
 
     var bodyStr = bodyToString(body);
-    console.log("[paywall] body 转 string 后长度: " + bodyStr.length + ", 前30字符: " + bodyStr.substring(0, 30));
+    dbg("body 转 string 后长度: " + bodyStr.length + ", 前30字符: " + bodyStr.substring(0, 30));
 
     if (bodyStr.length > 32) {
       var plain = decryptBody(bodyStr);
       if (plain && plain.trim().length > 0) {
-        console.log("[paywall] 解密成功 len=" + plain.length);
+        dbg("解密成功 len=" + plain.length);
         var url = $request.url;
 
         if (/\/mediayong\//.test(url)) {
@@ -168,7 +199,7 @@ try {
             var durationCut = getField(plain, "duration_cut") || 0;
             var preview = getField(plain, "MediaURLPreview") || "";
 
-            console.log("[paywall] 片段数=" + segs.length + " ProjectId=" + projectId);
+            dbg("片段数=" + segs.length + " ProjectId=" + projectId);
 
             if (segs.length > 0) {
               var payload = { projectId: projectId, activityName: activityName, duration: duration, durationCut: durationCut, preview: preview, segments: segs };
@@ -203,8 +234,12 @@ try {
               var exportText = expLines.join("\n");
 
               console.log(exportText);
-              $notification.post("🎬 完整视频已解锁", activityName || "视频详情", "共 " + segs.length + " 个片段\nProjectId: " + projectId + "\n完整时长 " + (duration/1000).toFixed(2) + "s\n\n片段URL已输出到日志", "");
-              console.log("[paywall] ✅ 通知已推送");
+              if (NOTIFY) {
+                $notification.post("🎬 完整视频已解锁", activityName || "视频详情", "共 " + segs.length + " 个片段\nProjectId: " + projectId + "\n完整时长 " + (duration/1000).toFixed(2) + "s\n\n片段URL已输出到日志", "");
+                console.log("[paywall] ✅ 通知已推送");
+              } else {
+                console.log("[paywall] 通知已关闭（NOTIFY=false）");
+              }
             } else {
               console.log("[paywall] ⚠️ 片段数为0");
             }
@@ -215,23 +250,23 @@ try {
         else if (/\/mediauyong\//.test(url)) {
           try {
             var cnt = (plain.match(/"recordId"/g) || []).length;
-            console.log("[paywall] 列表记录数=" + cnt);
+            dbg("列表记录数=" + cnt);
             if (cnt > 0) {
               var recRe = /"recordId"\s*:\s*(\d+)[^{}]*?"ProjectId"\s*:\s*"([^"]+)"/g;
               var list = [], mm;
               while ((mm = recRe.exec(plain)) !== null) list.push({ recordId: parseInt(mm[1], 10), projectId: mm[2] });
               $persistentStore.write(JSON.stringify(list), "paywall_list");
-              console.log("[paywall] ✅ 列表已存 " + list.length + " 条");
+              dbg("✅ 列表已存 " + list.length + " 条");
             }
           } catch (e) {
-            console.log("[paywall] 列表解析失败 " + e);
+            dbg("列表解析失败 " + e);
           }
         }
       } else {
-        console.log("[paywall] ⚠️ 解密失败或明文为空");
+        dbg("⚠️ 解密失败或明文为空");
       }
     } else {
-      console.log("[paywall] ⚠️ body 长度不足 32");
+      dbg("⚠️ body 长度不足 32");
     }
     $done({});
   }
