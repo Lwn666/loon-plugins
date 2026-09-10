@@ -1,5 +1,5 @@
 #!name=AgentRouter 每日签到
-#!desc=agentrouter.org 中转站每日自动签到（登录即签到，每日领 $25 额度），支持多账号，结果推送通知。
+#!desc=agentrouter.org 中转站每日自动签到（登录即签到，每日领 $25 额度），8-12 点随机时间执行，支持多账号，结果推送通知。
 #!author=Minis
 #!homepage=https://github.com/Lwn666/loon-plugins/tree/main/agentrouter
 #!icon=https://agentrouter.org/favicon.ico
@@ -16,26 +16,35 @@
 #   官方 FAQ 原文：签到领 $25 额度 需要退出后重新登陆才会到账。
 #   故本插件 = 用账号密码登录一次 + 回查日志确认。
 #
+# 【随机执行时间】
+#   为避免每天固定时刻请求被判定为自动化：
+#   - cron 每 15 分钟轮询（8-12 点）
+#   - 当天首次轮询时生成一个随机时间点存入本地
+#   - 到达该随机时间才真正登录签到
+#   - 签到成功后当天剩余轮询静默退出
+#   - 若 12 点后仍未签到（如 Loon 未运行）会自动补跑
+#   窗口可用 RANDOM_WINDOW 调整。
+#
 # 【使用方法】
 #   1. 在 Loon 插件参数 ACCOUNTS 里填写账号
 #      单账号：邮箱#密码
 #      多账号：每行一个，或用分号分隔
 #      分隔符兼容 # 和 | 和 ----
-#   2. 默认每天 08:00 执行，可用 CRONEXP 改时间
-#   3. 也可在 Loon 首页手动触发（通用脚本）
+#   2. 也可在 Loon 首页手动触发（通用脚本）
 #
 # 【注意】仅支持账号密码登录。GitHub 授权注册的账号
-#        若未设置密码，需先在站点「安全设置」里设置密码。
+#        密码字段为空，需先设置密码才能用本插件。
 # ============================================================
 
 [Argument]
 ACCOUNTS=input,"",tag=账号,desc=每行一个账号 邮箱和密码中间用井号连接 多账号换行或分号分隔
-CRONEXP=input,"0 8 * * *",tag=自定义执行时间,desc=默认每天08点执行 可自行更改
+RANDOM_WINDOW=input,"08:00-12:00",tag=随机时间窗口,desc=格式 起始-结束 如 08:00-12:00。在此区间内随机选一个时刻执行
+FORCE=switch,false,tag=立即执行,desc=开启后忽略随机窗口 立即签到（测试用）
 DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
 
 [Script]
-# 定时签到
-cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${DEBUG}}) with tag="AgentRouter 自动签到", timeout=120, enable=true, debug=${DEBUG}
+# 随机时间签到：每 15 分钟轮询，脚本内判断是否到达当天随机时间
+cron "*/15 8-12 * * *" then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${RANDOM_WINDOW}, ${FORCE}, ${DEBUG}}) with tag="AgentRouter 自动签到", timeout=120, enable=true, debug=${DEBUG}
 
-# 手动触发
-generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${DEBUG}}) with tag="AgentRouter 手动签到", img_url="arrow.clockwise", timeout=120, enable=true, debug=${DEBUG}
+# 手动触发（忽略随机窗口）
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${RANDOM_WINDOW}, ${FORCE}, ${DEBUG}}) with tag="AgentRouter 手动签到", img_url="arrow.clockwise", timeout=120, enable=true, debug=${DEBUG}
