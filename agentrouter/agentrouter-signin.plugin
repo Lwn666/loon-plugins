@@ -29,7 +29,7 @@
 # ============================================================
 
 [Argument]
-ACCOUNTS=input,"",tag=账号,desc=格式 邮箱#密码。多账号用换行或分号分隔
+ACCOUNTS=input,"",tag=账号,desc=每行一个账号 邮箱和密码中间用井号连接 多账号换行或分号分隔
 CRONEXP=input,"0 8 * * *",tag=自定义执行时间,desc=默认每天08点执行 可自行更改
 DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
 
