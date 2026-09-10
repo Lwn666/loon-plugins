@@ -1,0 +1,41 @@
+#!name=AgentRouter 每日签到
+#!desc=agentrouter.org 中转站每日自动签到（登录即签到，每日领 $25 额度），支持多账号，结果推送通知。
+#!author=Minis
+#!homepage=https://github.com/Lwn666/loon-plugins/tree/main/agentrouter
+#!icon=https://agentrouter.org/favicon.ico
+#!category=Sign
+#!loon_version=3.5.1(983)
+
+# ============================================================
+# AgentRouter 每日签到
+#
+# 【站点机制】本站没有独立的「签到」接口，签到 = 每天第一次登录：
+#   POST /api/user/login 时服务端顺带发放当日额度，
+#   响应 data.checked_in = true，并在「使用日志」落一条
+#   type=4 的「每日签到成功，增加额度 $25」记录。
+#   官方 FAQ 原文：签到领 $25 额度 需要退出后重新登陆才会到账。
+#   故本插件 = 用账号密码登录一次 + 回查日志确认。
+#
+# 【使用方法】
+#   1. 在 Loon 插件参数 ACCOUNTS 里填写账号
+#      单账号：邮箱#密码
+#      多账号：每行一个，或用分号分隔
+#      分隔符兼容 # 和 | 和 ----
+#   2. 默认每天 08:00 执行，可用 CRONEXP 改时间
+#   3. 也可在 Loon 首页手动触发（通用脚本）
+#
+# 【注意】仅支持账号密码登录。GitHub 授权注册的账号
+#        若未设置密码，需先在站点「安全设置」里设置密码。
+# ============================================================
+
+[Argument]
+ACCOUNTS=input,"",tag=账号,desc=格式 邮箱#密码。多账号用换行或分号分隔
+CRONEXP=input,"0 8 * * *",tag=自定义执行时间,desc=默认每天08点执行 可自行更改
+DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
+
+[Script]
+# 定时签到
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${DEBUG}}) with tag="AgentRouter 自动签到", timeout=120, enable=true, debug=${DEBUG}
+
+# 手动触发
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${DEBUG}}) with tag="AgentRouter 手动签到", img_url="arrow.clockwise", timeout=120, enable=true, debug=${DEBUG}
