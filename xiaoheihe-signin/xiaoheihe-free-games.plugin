@@ -1,0 +1,34 @@
+#!name=小黑盒限免监控
+#!desc=小黑盒限免（喜加一）监控：自动捕获 Cookie，定时检测 Epic/Steam 限时免费游戏并通知，Epic 提供一键领取链接。纯 JS 签名不依赖外部服务。
+#!author=Minis
+#!homepage=https://github.com/Lwn666/loon-plugins/tree/main/xiaoheihe-signin
+#!icon=https://imgheybox.max-c.com/oa/2023/04/18/b8ce300a159da1e08ffb1eeb9f63402f.png
+#!system=iOS,iPadOS,tvOS,macOS
+#!system_version=15
+#!loon_version=3.5.1(983)
+#!tag=限免,喜加一,Epic,Steam
+#!type=normal
+
+# ============================================================
+# 小黑盒限免（喜加一）监控
+#
+# 【凭证】打开小黑盒 App 任意页面即自动捕获 Cookie，无需手动填。
+#
+# 【功能】定时检测 Epic / Steam 限时免费游戏并推送通知，
+#        Epic 限免附带一键领取链接。纯 JS 签名，不依赖外部服务。
+#
+# 【使用】装好插件后打开一次小黑盒 App 完成凭证捕获即可，
+#        之后默认每天 10:00 自动检测。
+# ============================================================
+
+[Argument]
+auto_cookie=switch,true,tag=自动捕获Cookie,desc=打开小黑盒App时自动更新Cookie
+cookie=input,"",tag=手动Cookie(可选),desc=自动捕获失效时的兜底 可留空
+cron_expr=input,"0 10 * * *",tag=检查时间,desc=默认每天10点执行 可自行更改
+
+[Script]
+# 凭证捕获：打开小黑盒 App 任意页面自动截获 Cookie
+request if ${url} ~= /^https?:\/\/api\.xiaoheihe\.cn\/.+/i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/xiaoheihe-signin/capture.js") with tag="小黑盒捕获Cookie", timeout=10, enable=${auto_cookie}
+
+# 定时限免检测
+cron ${cron_expr} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/xiaoheihe-signin/xiaoheihe-free-games.js", {${cookie}}) with tag="小黑盒限免监控", timeout=60, enable=true
