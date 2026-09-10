@@ -1,0 +1,40 @@
+#!name=小黑盒自动签到
+#!desc=小黑盒每日自动签到+每日任务（分享帖子/游戏详情/游戏评价）。自动捕获 Cookie，无需手动填。支持多账号，每天 08:00 自动执行。
+#!author=Minis
+#!homepage=https://github.com/Lwn666/loon-plugins/tree/main/xiaoheihe-signin
+#!icon=https://imgheybox.max-c.com/oa/2023/04/18/b8ce300a159da1e08ffb1eeb9f63402f.png
+#!system=iOS,iPadOS,tvOS,macOS
+#!system_version=15
+#!loon_version=3.5.1(983)
+#!tag=签到,小黑盒,H币
+#!type=normal
+
+# ============================================================
+# 小黑盒自动签到
+#
+# 【凭证】打开小黑盒 App 任意页面即自动捕获 Cookie 并存入本地，
+#        无需手动填写。自动捕获失效时可用「手动Cookie」兜底。
+#
+# 【功能】每日签到 + 每日任务（分享帖子 / 游戏详情 / 游戏评价）
+#
+# 【使用】装好插件后打开一次小黑盒 App 完成凭证捕获即可，
+#        之后默认每天 08:00 自动签到，也可在首页手动触发。
+# ============================================================
+
+[Argument]
+auto_cookie=switch,true,tag=自动捕获Cookie,desc=打开小黑盒App时自动更新Cookie
+cookie=input,"",tag=手动Cookie(可选),desc=自动捕获失效时的兜底 可留空
+cron_expr=input,"0 8 * * *",tag=签到时间,desc=默认每天08点执行 可自行更改
+enable_tasks=switch,true,tag=每日任务,desc=分享帖子 游戏详情 游戏评价
+debug=switch,false,tag=调试模式,desc=开启后输出详细日志
+
+[Script]
+# 凭证捕获：打开小黑盒 App 任意页面自动截获 Cookie
+request if ${url} ~= /^https?:\/\/api\.xiaoheihe\.cn\/.+/i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/xiaoheihe-signin/capture.js") with tag="小黑盒捕获Cookie", timeout=10, enable=${auto_cookie}
+
+# 定时签到 + 每日任务
+cron ${cron_expr} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/xiaoheihe-signin/xiaoheihe-signin.js", {${cookie}, ${enable_tasks}, ${debug}}) with tag="小黑盒签到", timeout=180, enable=true, debug=${debug}
+
+[Host]
+api.xiaoheihe.cn = 直连
+hkey.qcciii.com = 直连
