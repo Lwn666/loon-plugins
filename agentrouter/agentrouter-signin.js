@@ -17,11 +17,20 @@
  *   签到入口就是登录本身。故本脚本 = 用账号密码登录一次，
  *   再回查 /api/log/self 确认签到日志确实落库。
  *
+ * 【随机执行时间】
+ * 为避免每天固定时刻请求被判定为自动化，默认在 08:00-12:00 之间
+ * 随机选一个时间执行：
+ *   - cron 每 15 分钟轮询一次（8-12 点内）
+ *   - 当天首次轮询时生成随机偏移，写入 $persistentStore
+ *   - 后续轮询对比当前时间，到达随机时间才真正执行
+ *   - 成功后记录日期，当天剩余轮询静默退出
+ *   窗口与轮询表达式均可在插件参数中调整。
+ *
  * 【插件参数】
- *   ACCOUNTS  单账号：邮箱#密码
- *             多账号：换行 / 分号 分隔
- *             分隔符兼容 # | ----
- *   DEBUG     开启后输出详细日志
+ *   ACCOUNTS       单账号：邮箱#密码；多账号换行 / 分号分隔
+ *   RANDOM_WINDOW  随机时间窗口，默认 "08:00-12:00"
+ *   FORCE          开关，忽略随机窗口立即执行（测试用）
+ *   DEBUG          开关，输出详细日志
  *
  * 原始 Python 参考：https://github.com/773075692/agentrouter-checkin
  * ----------------------------------------------------------------
@@ -32,6 +41,11 @@ var LOGIN_PATH = "/api/user/login";
 var LOG_PATH = "/api/log/self";
 var TIMEOUT = 25000;
 var QUOTA_PER_UNIT = 500000; // 站点 /api/status 的 quota_per_unit：1 USD = 500000 quota
+
+// 本地存储 key
+var STORE_DATE = "agentrouter_signin_date";     // 最近一次签到成功的日期
+var STORE_TARGET = "agentrouter_signin_target"; // 当天随机时间点 YYYY-MM-DD:偏移分钟
+var STORE_FAIL = "agentrouter_fail_notified";   // 最近一次失败通知的日期
 
 var UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) " +
@@ -99,7 +113,7 @@ function parseAccounts(raw) {
     } catch (e) {}
   }
 
-  text.split(/[\n;]+/).forEach(function (line, i) {
+  text.split(/[\n;]+/).forEach(function (line) {
     line = line.trim();
     if (!line || line.charAt(0) === "#") return;
     var p = splitAccount(line);
@@ -108,6 +122,51 @@ function parseAccounts(raw) {
     }
   });
   return list;
+}
+
+/* ========================= 时间工具 ========================= */
+
+function pad(n) {
+  return n < 10 ? "0" + n : "" + n;
+}
+
+function todayStr(d) {
+  d = d || new Date();
+  return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+}
+
+function nowMinutes() {
+  var d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+function fmtMin(m) {
+  return pad(Math.floor(m / 60)) + ":" + pad(m % 60);
+}
+
+// 解析 "08:00-12:00" -> {start, end}（单位：分钟）
+function parseWindow(s) {
+  var m = String(s || "").match(/^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$/);
+  if (!m) return { start: 8 * 60, end: 12 * 60 };
+  var st = Number(m[1]) * 60 + Number(m[2]);
+  var en = Number(m[3]) * 60 + Number(m[4]);
+  if (en <= st) en = st + 60;
+  return { start: st, end: en };
+}
+
+// 取当天随机执行时间点（分钟）；已生成过则复用
+function pickTargetMin(win, today, dbg) {
+  var rec = $persistentStore.read(STORE_TARGET) || "";
+  var parts = String(rec).split(":");
+  if (parts[0] === today && parts.length >= 2 && !isNaN(Number(parts[1]))) {
+    return Number(parts[1]) + win.start;
+  }
+  // 留出轮询间隔，保证窗口内一定有后续触发点
+  var span = Math.max(1, win.end - win.start - 10);
+  var off = Math.floor(Math.random() * span);
+  $persistentStore.write(today + ":" + off, STORE_TARGET);
+  if (dbg) log("今日随机执行时间：" + fmtMin(win.start + off));
+  return win.start + off;
 }
 
 /* ========================= 工具 ========================= */
@@ -120,7 +179,6 @@ function toStr(d) {
   if (d === null || d === undefined) return "";
   if (typeof d === "string") return d;
   if (typeof d === "object" && d.length !== undefined) {
-    // Uint8Array 归一化
     var s = "";
     for (var i = 0; i < d.length; i++) s += String.fromCharCode(d[i]);
     return s;
@@ -306,6 +364,45 @@ function runAccount(acct, dbg, done) {
   });
 }
 
+/* ========================= 随机时间闸门 ========================= */
+
+// 返回 true 表示本次应当执行签到
+function shouldRunNow(args, dbg) {
+  var today = todayStr();
+
+  // 今天已签到成功 → 静默退出
+  if ($persistentStore.read(STORE_DATE) === today) {
+    if (dbg) log("今日已签到，跳过本轮轮询");
+    return false;
+  }
+
+  // 手动强制
+  if (String(args.FORCE) === "true" || args.FORCE === true) {
+    if (dbg) log("FORCE 已开启，忽略随机窗口立即执行");
+    return true;
+  }
+
+  var win = parseWindow(args.RANDOM_WINDOW);
+  var target = pickTargetMin(win, today, dbg);
+  var now = nowMinutes();
+  var nowS = fmtMin(now);
+
+  // 窗口已过 → 补跑，避免因 Loon 未运行而整日漏签
+  if (now > win.end) {
+    log("已过随机窗口（" + fmtMin(win.start) + "-" + fmtMin(win.end) +
+        "，目标 " + fmtMin(target) + "），当前 " + nowS + " 补执行");
+    return true;
+  }
+
+  if (now < target) {
+    if (dbg) log("当前 " + nowS + "，未到随机时间 " + fmtMin(target) + "，等待下一轮");
+    return false;
+  }
+
+  log("到达随机时间（目标 " + fmtMin(target) + "，当前 " + nowS + "），开始执行");
+  return true;
+}
+
 /* ========================= 主流程 ========================= */
 
 function main() {
@@ -319,6 +416,10 @@ function main() {
     return $done();
   }
 
+  // 随机时间闸门
+  if (!shouldRunNow(args, dbg)) return $done();
+
+  var today = todayStr();
   log("AgentRouter 自动签到启动，共 " + accounts.length + " 个账号");
 
   var results = [];
@@ -329,9 +430,9 @@ function main() {
     var acct = accounts[idx++];
     runAccount(acct, dbg, function (res) {
       results.push(res);
-      // 多账号之间稍作间隔，避免触发限流
       if (idx < accounts.length) {
-        setTimeout(next, 2000);
+        // 多账号之间随机间隔，避免规律性请求
+        setTimeout(next, 2000 + Math.floor(Math.random() * 4000));
       } else {
         finish();
       }
@@ -349,6 +450,12 @@ function main() {
       return tag + " " + r.name + "：" + r.msg + " | 额度 " + fmtQuota(r.quota);
     });
 
+    // 全部成功 → 记录日期，当天不再轮询
+    if (failCount === 0) {
+      $persistentStore.write(today, STORE_DATE);
+      log("已记录今日签到完成（" + today + "）");
+    }
+
     var title = "AgentRouter 签到";
     var subtitle =
       failCount === 0
@@ -358,7 +465,17 @@ function main() {
     log(subtitle);
     lines.forEach(log);
 
-    $notification.post(title, subtitle, lines.join("\n"));
+    // 失败只在当天首次推送，避免轮询期内重复轰炸
+    var shouldNotify = true;
+    if (failCount > 0 && $persistentStore.read(STORE_FAIL) === today) {
+      shouldNotify = false;
+      if (dbg) log("今日已推送过失败通知，跳过");
+    }
+    if (failCount > 0) $persistentStore.write(today, STORE_FAIL);
+
+    if (shouldNotify) {
+      $notification.post(title, subtitle, lines.join("\n"));
+    }
     $done();
   }
 
