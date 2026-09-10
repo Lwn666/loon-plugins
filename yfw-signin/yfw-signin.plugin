@@ -6,17 +6,32 @@
 #!category=Sign
 #!loon_version=3.5.1(983)
 
+# ============================================================
+# 药房网自动签到
+#
+# 【凭证】打开 m.yaofangwang.com 签到页即自动捕获 ASP.NET_SessionId，
+#        存入本地持久存储，无需手动填写。
+#
+# 【流程】读 SessionId → 拉签到页提取 accountid →
+#        GET /customer/SignNew?accountid=xxx → 推送结果
+#        注：SignNew 不带 accountid 会被服务端按匿名处理，
+#        导致 signalltime/weeksigntime 恒为 1，故必须先取 accountid。
+#
+# 【使用】装好插件后打开一次签到页完成凭证捕获，
+#        之后默认每天 08:00 自动签到，也可在首页手动触发。
+# ============================================================
+
 [Argument]
 CAPTURE_ENABLE=switch,true,tag=凭证自动捕获,desc=打开药房网页面时自动更新签到凭证
-CRONEXP=input,"0 8 * * *",tag=自定义执行时间,desc=默认每天08:00执行 可自行更改
+CRONEXP=input,"0 8 * * *",tag=自定义执行时间,desc=默认每天08点执行 可自行更改
 DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
 
 [Script]
 # 凭证捕获：打开签到页时自动截获 ASP.NET_SessionId 写入持久存储
-request if ${url} ~= /^https?:\/\/m\.yaofangwang\.com\/customer\/sign_ios\.html/i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/yfw-signin/capture.js", {${DEBUG}}) with tag="药房网凭证捕获", requires_body=false, timeout=10, enable=${CAPTURE_ENABLE}
+request if ${url} ~= /^https?:\/\/m\.yaofangwang\.com\/customer\/sign_ios\.html/i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/yfw-signin/capture.js", {${DEBUG}}) with tag="药房网凭证捕获", timeout=10, enable=${CAPTURE_ENABLE}
 
-# 定时签到（cron 表达式来自参数；timeout 固定 30s）
-cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/yfw-signin/signin.js", {${DEBUG}}) with tag="药房网自动签到", timeout=30, enable=true
+# 定时签到（cron 表达式来自参数）
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/yfw-signin/signin.js", {${DEBUG}}) with tag="药房网自动签到", timeout=30, enable=true, debug=${DEBUG}
 
 [MITM]
 hostname = m.yaofangwang.com
