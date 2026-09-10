@@ -1,5 +1,5 @@
-#!name=微电影付费墙解锁
-#!desc=解密微电影小程序（垂云通天河等）付费视频，旁路提取完整视频合成片段 URL。AES-128-CBC（key=7749174464527483）已实测验证。
+#!name=OMG 心跳乐园韵味摄影视频解锁
+#!desc=解密 OMG 心跳乐园韵味摄影（微信小程序）付费视频，旁路提取完整视频合成片段 URL。AES-128-CBC（key=7749174464527483）已实测验证。
 #!author=Minis
 #!homepage=https://github.com/Lwn666/loon-plugins/tree/main/paywall
 #!system=iOS
@@ -9,17 +9,17 @@
 #!type=normal
 
 # ============================================================
-# 微电影付费墙解锁
+# OMG 心跳乐园韵味摄影视频解锁
 #
-# 【功能】拦截微电影小程序的加密响应，用 AES-128-CBC 解密，
-#        旁路提取完整视频的合成片段 URL，并生成
-#        curl 下载 + ffmpeg 拼合命令（输出到日志）。
+# 【功能】拦截 OMG 心跳乐园韵味摄影小程序的加密响应，
+#        用 AES-128-CBC 解密，旁路提取完整视频的合成片段 URL，
+#        并生成 curl 下载 + ffmpeg 拼合命令（输出到日志）。
 #
 # 【使用】装好插件后打开视频详情页即自动解锁，
 #        解密到完整片段时会推送通知（可关）。
 #        导出命令见 Loon 日志。
 #
-# 【原理】微电影小程序（垂云通天河等）的付费视频在客户端
+# 【原理】OMG 心跳乐园韵味摄影小程序的付费视频在客户端
 #        由 AES-128-CBC 加密返回，key 硬编码在客户端。
 #        本插件在响应阶段解密，拿到完整片段列表。
 # ============================================================
@@ -29,7 +29,7 @@ NOTIFY=switch,true,tag=解锁通知,desc=解密到完整视频片段时推送通
 DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
 
 [Script]
-response if ${url} ~= /^https:\/\/microfilm\.good-wesee\.com:46735\//i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/paywall/paywall-unlock.js", {${NOTIFY}, ${DEBUG}}) with tag="付费墙解密", timeout=30, requires_body=true, enable=true, debug=${DEBUG}
+response if ${url} ~= /^https:\/\/microfilm\.good-wesee\.com:46735\//i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/paywall/paywall-unlock.js", {${NOTIFY}, ${DEBUG}}) with tag="视频解锁", timeout=30, requires_body=true, enable=true, debug=${DEBUG}
 
 [MITM]
 hostname = microfilm.good-wesee.com
