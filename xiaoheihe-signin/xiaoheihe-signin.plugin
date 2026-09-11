@@ -1,7 +1,7 @@
 #!name=小黑盒自动签到
 #!desc=小黑盒每日自动签到+每日任务（分享帖子/游戏详情/游戏评价）。自动捕获 Cookie，无需手动填。支持多账号，每天 08:00 自动执行。
 #!author=Minis
-#!homepage=https://github.com/Lwn666/loon-plugins/tree/main/xiaoheihe-signin
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/xiaoheihe-signin/README.md
 #!icon=https://imgheybox.max-c.com/oa/2023/04/18/b8ce300a159da1e08ffb1eeb9f63402f.png
 #!system=iOS,iPadOS,tvOS,macOS
 #!system_version=15
@@ -35,6 +35,5 @@ request if ${url} ~= /^https?:\/\/api\.xiaoheihe\.cn\/.+/i then script("https://
 # 定时签到 + 每日任务
 cron ${cron_expr} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/xiaoheihe-signin/xiaoheihe-signin.js", {${cookie}, ${enable_tasks}, ${debug}}) with tag="小黑盒签到", timeout=180, enable=true, debug=${debug}
 
-[Host]
-api.xiaoheihe.cn = 直连
-hkey.qcciii.com = 直连
+# 手动触发（Loon 首页点一下即跑，忽略 cron 时间）
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/xiaoheihe-signin/xiaoheihe-signin.js", {${cookie}, ${enable_tasks}, ${debug}}) with tag="小黑盒手动签到", img_url="arrow.clockwise", timeout=180, enable=true, debug=${debug}
