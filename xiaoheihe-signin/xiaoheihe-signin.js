@@ -13,7 +13,7 @@
  * 
  * 配置（插件参数或环境变量）：
  * - cookie: "heybox_id#pkey=xxx;x_xhh_tokenid=xxx"（多账号 & 分隔）
- * - 可选: XHH_HKEY_SERVER / XHH_IMEI / XHH_ENABLE_TASKS(1=启用每日任务)
+ * - 可选: XHH_IMEI（设备 imei，默认内置）
  */
 
 // ============ 配置 ============
@@ -73,13 +73,6 @@ function bodyToString(body) {
     return s;
   }
   return String(body || "");
-}
-
-function randomNonce() {
-  var chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  var out = "";
-  for (var i = 0; i < 32; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
-  return out;
 }
 
 function randomUUID() {
@@ -381,6 +374,12 @@ async function taskShareGameComment(account) {
 
 // ============ 单个账号 ============
 async function signAccount(account) {
+  // 时间预算：多账号时单账号不能吃掉全部 timeout（否则被 Loon 强杀，通知都发不出）
+  var budgetMs = parseInt(getEnv("XHH_BUDGET_MS"), 10) || 70000;
+  var t0 = Date.now();
+  function overBudget() { return (Date.now() - t0) > budgetMs; }
+  function elapsedS() { return Math.round((Date.now() - t0) / 1000); }
+
   // 每日任务：默认开启；仅显式传 false/0 才关闭（兼容旧插件未传参数的情况）
   var et = getEnv("enable_tasks");
   var enableTasks = et === "" ? true : !(et === "false" || et === "0");
@@ -535,34 +534,29 @@ async function signAccount(account) {
   if (enableTasks) {
     log("---- 开始每日任务");
     try {
-      if ((tasks["分享任意帖子到社交平台"] || {}).state === "waiting") {
-        log("#### 执行分享帖子任务");
-        var r1 = await taskSharePost(account);
-        taskResults.push(r1.indexOf("ok") === 0 ? "✅ 分享帖子 · 完成" : "❌ 分享帖子 · " + r1);
-        log(r1.indexOf("ok") === 0 ? "- ✅ 分享帖子任务完成" : "- ❌ 分享帖子任务失败: " + r1);
+      // 任务标题 → 执行函数。原来是三段复制粘贴，现在数据驱动（新增任务只加一行）
+      var runners = [
+        { title: "分享任意帖子到社交平台", label: "分享帖子", fn: taskSharePost },
+        { title: "分享游戏详情到社交平台", label: "分享游戏详情", fn: taskShareGameDetail },
+        { title: "分享游戏评价到社交平台", label: "分享游戏评价", fn: taskShareGameComment }
+      ];
+      for (var ri = 0; ri < runners.length; ri++) {
+        var runner = runners[ri];
+        if (((tasks[runner.title] || {}).state) !== "waiting") {
+          log("- 今日" + runner.label + "任务已完成");
+          continue;
+        }
+        if (overBudget()) {
+          log("- ⏱️ 已用 " + elapsedS() + "s 超出预算，跳过剩余任务（明日会补跑）");
+          taskResults.push("⏱️ " + runner.label + " · 超时跳过（明日补跑）");
+          continue;
+        }
+        log("#### 执行" + runner.label + "任务");
+        var rr = await runner.fn(account);
+        var ok = rr.indexOf("ok") === 0;
+        taskResults.push(ok ? "✅ " + runner.label + " · 完成" : "❌ " + runner.label + " · " + rr);
+        log(ok ? "- ✅ " + runner.label + "任务完成" : "- ❌ " + runner.label + "任务失败: " + rr);
         didRunTask = true;
-      } else {
-        log("- 今日分享帖子任务已完成");
-      }
-
-      if ((tasks["分享游戏详情到社交平台"] || {}).state === "waiting") {
-        log("#### 执行分享游戏详情任务");
-        var r2 = await taskShareGameDetail(account);
-        taskResults.push(r2.indexOf("ok") === 0 ? "✅ 分享游戏详情 · 完成" : "❌ 分享游戏详情 · " + r2);
-        log(r2.indexOf("ok") === 0 ? "- ✅ 分享游戏详情任务完成" : "- ❌ 分享游戏详情任务失败: " + r2);
-        didRunTask = true;
-      } else {
-        log("- 今日分享游戏详情任务已完成");
-      }
-
-      if ((tasks["分享游戏评价到社交平台"] || {}).state === "waiting") {
-        log("#### 执行分享游戏评价任务");
-        var r3 = await taskShareGameComment(account);
-        taskResults.push(r3.indexOf("ok") === 0 ? "✅ 分享游戏评价 · 完成" : "❌ 分享游戏评价 · " + r3);
-        log(r3.indexOf("ok") === 0 ? "- ✅ 分享游戏评价任务完成" : "- ❌ 分享游戏评价任务失败: " + r3);
-        didRunTask = true;
-      } else {
-        log("- 今日分享游戏评价任务已完成");
       }
     } catch (e) {
       taskResults.push("❌ 每日任务 · 异常 " + e.message);
@@ -571,63 +565,62 @@ async function signAccount(account) {
     if (didRunTask) log("---- 每日任务执行完毕"); else log("---- 每日任务已全部完成");
   }
 
-  // 5. 执行过任务才等待结算 + 统计
+  // 5. 结算：轮询任务状态直到没有 waiting（最多 3 次），最后一次结果同时用于
+  //    任务进度统计 与 用户信息/今日获得差值统计。
+  //    原先 5 和 5.5 各自再拉 list_v2，单账号会白多 2~3 次请求（每次还要换一次 hkey）。
   var taskProgress = "";
+  var afterUser = null;
+  var finalTasks = null;
   if (enableTasks && didRunTask) {
     try {
-      for (var w = 0; w < 2; w++) {
+      for (var w = 0; w < 3; w++) {
         var list2 = await signedGet(account, "/task/list_v2/");
+        if (list2.status !== "ok" || !list2.result) break;
+        if (list2.result.task_list) finalTasks = list2.result.task_list;
+        if (list2.result.user) {
+          var _u = list2.result.user, _l = _u.level_info || {};
+          afterUser = { exp: _l.exp, coin: _l.coin, battery: _u.battery, level: _l.level };
+          user = _u; // 用最新的用户信息输出，避免显示执行前的旧值
+        }
         var waitingCount = 0;
-        if (list2.status === "ok" && list2.result && list2.result.task_list) {
-          for (var i2 = 0; i2 < list2.result.task_list.length; i2++) {
-            var g2 = list2.result.task_list[i2];
-            for (var j2 = 0; j2 < (g2.tasks || []).length; j2++) {
-              if (g2.tasks[j2].state === "waiting") waitingCount++;
-            }
+        for (var i2 = 0; i2 < (finalTasks || []).length; i2++) {
+          var g2 = finalTasks[i2];
+          for (var j2 = 0; j2 < (g2.tasks || []).length; j2++) {
+            if (g2.tasks[j2].state === "waiting") waitingCount++;
           }
         }
-        if (waitingCount === 0) break;
+        if (waitingCount === 0 || w === 2) break;
         await sleep(3000);
       }
-      var list3 = await signedGet(account, "/task/list_v2/");
-      if (list3.status === "ok" && list3.result && list3.result.task_list) {
-        var done = 0, total = 0;
-        for (var i3 = 0; i3 < list3.result.task_list.length; i3++) {
-          var g3 = list3.result.task_list[i3];
+      if (finalTasks) {
+        var done = 0, total = 0, rebuilt = {};
+        for (var i3 = 0; i3 < finalTasks.length; i3++) {
+          var g3 = finalTasks[i3];
           for (var j3 = 0; j3 < (g3.tasks || []).length; j3++) {
+            var _t3 = g3.tasks[j3];
             total++;
-            if (g3.tasks[j3].state === "finish") done++;
+            if (_t3.state === "finish") done++;
+            // 本次刚完成的任务，执行前是 waiting，只有这里才是 finish
+            rebuilt[_t3.title] = { state: _t3.state, award: parseAwards(_t3.award_desc_v2) };
           }
         }
         taskProgress = "📊 任务进度 · " + done + "/" + total;
+        tasks = rebuilt;
+      }
+    } catch (e) {
+      log("- ⚠️ 任务结算异常: " + e.message);
+    }
+  } else {
+    // 本次没跑任务，但仍要取最新余额，才能算出（签到带来的）今日实际所得
+    try {
+      var lu0 = await signedGet(account, "/task/list_v2/");
+      if (lu0.status === "ok" && lu0.result && lu0.result.user) {
+        var _u0 = lu0.result.user, _l0 = _u0.level_info || {};
+        afterUser = { exp: _l0.exp, coin: _l0.coin, battery: _u0.battery, level: _l0.level };
+        user = _u0;
       }
     } catch (e) {}
   }
-
-  // 5.5 今日获得统计：以「执行前 → 执行后」用户信息差值为准（接口真实值）
-  //    差值拿不到时，退回按 award_desc_v2 解析的奖励累加
-  var afterUser = null;
-  var tasksAfter = null;
-  try {
-    var lu = await signedGet(account, "/task/list_v2/");
-    if (lu.status === "ok" && lu.result && lu.result.user) {
-      var _u = lu.result.user, _l = _u.level_info || {};
-      afterUser = { exp: _l.exp, coin: _l.coin, battery: _u.battery, level: _l.level };
-      user = _u; // 用最新的用户信息输出，避免显示执行前的旧值
-      // 重新抓任务状态：本次刚完成的任务，执行前是 waiting，只有这里才是 finish
-      if (lu.result.task_list) {
-        tasksAfter = {};
-        for (var _i = 0; _i < lu.result.task_list.length; _i++) {
-          var _g = lu.result.task_list[_i];
-          for (var _j = 0; _j < (_g.tasks || []).length; _j++) {
-            var _t = _g.tasks[_j];
-            tasksAfter[_t.title] = { state: _t.state, award: parseAwards(_t.award_desc_v2) };
-          }
-        }
-        tasks = tasksAfter; // 后续统计用执行后的状态
-      }
-    }
-  } catch (e) {}
 
   var gotExp = 0, gotCoin = 0, gotBattery = 0;
   var diffOk = false;
@@ -695,9 +688,9 @@ async function signAccount(account) {
 // ============ 主流程 ============
 async function main() {
   var messages = [];
-  // 优先读取自动捕获的 Cookie（http-request 捕获脚本写入），插件参数兜底
-  // 调试：输出 argument 原始内容（帮助排查参数传递格式）
-  try { log("argument: " + (typeof $argument !== "undefined" ? $argument : "未定义")); } catch (e) {}
+  var failed = false;   // 显式标记失败，不再用中文关键字猜（任务名里带"失败"会误判）
+  // 读取自动捕获的 Cookie（http-request 捕获脚本写入），插件参数兜底
+  // 注意：不要把 $argument 整体打进日志，它含明文 cookie
   var rawCookie = "";
   try {
     if (typeof $persistentStore !== "undefined") rawCookie = $persistentStore.read("xiaoheihe_cookie") || "";
@@ -744,20 +737,19 @@ async function main() {
       var result = await signAccount(account);
       var label = account.heyboxId ? "账号 " + account.heyboxId : "账号 " + (i + 1);
       messages.push("── " + label + " ──\n" + result.msg);
+      if (!result.ok) failed = true;
       // 通知内容不再打印到控制台（逐步日志已输出执行过程，避免重复）
     } catch (e) {
       var errMsg = "❌ 账号" + (i + 1) + " · 异常 " + e.message;
       messages.push(errMsg);
+      failed = true;
       log(errMsg);
     }
     if (i < accounts.length - 1) await sleep(1500);
   }
 
-  var title = "小黑盒签到";
+  var title = failed ? "小黑盒签到 ⚠️" : "小黑盒签到";
   var joined = messages.join("\n");
-  if (joined.indexOf("失败") !== -1 || joined.indexOf("异常") !== -1 || joined.indexOf("失效") !== -1) {
-    title = "小黑盒签到 ⚠️";
-  }
   $notification.post(title, "", joined);
   log("完成");
   $done();
