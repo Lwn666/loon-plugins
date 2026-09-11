@@ -159,6 +159,45 @@ function buildInfoLines(user, dailyExp, dailyGain) {
   return out;
 }
 
+/**
+ * 任务索引。返回 { byId, byTitle, all }：
+ * - byId   : 以 report_extra.task_id 为键（稳定，服务端改文案不受影响）
+ * - byTitle: 标题兜底（签到等无 task_id 的任务）
+ * - all    : 去重后的一维列表，供遍历统计（直接 for-in byId 会漏掉/重算）
+ * 实测 task_id: 1=分享帖子, 19=分享游戏详情, 31=分享游戏评价。
+ * 早期版本按中文标题匹配，服务端一改文案就静默失效——task_id 不会变。
+ */
+var TASK_IDS = { POST: "1", GAME_DETAIL: "19", GAME_COMMENT: "31" };
+
+function indexDailyTasks(taskList) {
+  var byId = {}, byTitle = {}, all = [];
+  for (var i = 0; i < taskList.length; i++) {
+    var group = taskList[i];
+    for (var j = 0; j < (group.tasks || []).length; j++) {
+      var t = group.tasks[j];
+      var re = t.report_extra || {};
+      var entry = {
+        state: t.state,
+        title: t.title,
+        type: t.type,
+        taskId: re.task_id || "",
+        group: group.title || "",
+        award: parseAwards(t.award_desc_v2)
+      };
+      all.push(entry);
+      if (re.task_id) byId[re.task_id] = entry;
+      if (!byTitle[t.title]) byTitle[t.title] = entry;
+    }
+  }
+  return { byId: byId, byTitle: byTitle, all: all };
+}
+
+/** 取任务状态：优先 task_id，取不到再退回标题 */
+function taskState(tasks, taskId, titleFallback) {
+  var e = (taskId && tasks.byId[taskId]) || tasks.byTitle[titleFallback];
+  return e ? e.state : "";
+}
+
 // 深度遍历找含指定字段的对象
 function collectByKeys(node, keys, limit, out) {
   out = out || [];
@@ -180,6 +219,20 @@ function collectByKeys(node, keys, limit, out) {
 
 // ============ 签名与请求 ============
 
+// 签名服务是单点：挂了整个插件报废。成功一次就置回 false，只在「首次失败」时告警一次，
+// 避免多任务/多账号反复弹通知。
+var hkeyAlerted = false;
+
+function hkeyFail(kind, detail) {
+  var msg = "签名服务" + kind + "异常，本次签到无法完成。\n" +
+    String(detail).slice(0, 160) + "\n服务: " + HKEY_SERVER;
+  log("❌ " + msg.replace(/\n/g, " | "));
+  if (!hkeyAlerted) {
+    hkeyAlerted = true;
+    try { $notification.post("小黑盒签到 ⚠️", "签名服务不可用", msg); } catch (e) {}
+  }
+}
+
 /**
  * 获取 hkey 签名（mode=request 或 mode=report）
  */
@@ -188,10 +241,18 @@ async function getHkey(mode, path, timeSec, text, imei, heyboxId) {
     var url = HKEY_SERVER + "?mode=request&path=" + encodeURIComponent(path) +
       "&time=" + timeSec + "&imei=" + imei + "&heybox_id=" + heyboxId;
     var resp = await httpGet(url, { "User-Agent": UA, "Accept": "application/json" });
-    var data = JSON.parse(resp.body);
+    var data;
+    try {
+      data = JSON.parse(resp.body);
+    } catch (e) {
+      hkeyFail("返回异常", "HTTP " + resp.status + " " + String(resp.body).slice(0, 120));
+      throw new Error("hkey 服务返回非 JSON");
+    }
     if (data.status !== "ok" || !data.result || !data.result.hkey) {
+      hkeyFail("请求失败", resp.body.slice(0, 160));
       throw new Error("hkey 服务失败: " + resp.body.slice(0, 200));
     }
+    hkeyAlerted = false;   // 恢复正常，下次失败重新告警
     return data.result;
   } else {
     // mode=report
@@ -204,7 +265,12 @@ async function getHkey(mode, path, timeSec, text, imei, heyboxId) {
       heybox_id: heyboxId
     });
     var resp2 = await httpPost(HKEY_SERVER, { "Content-Type": "application/json" }, body);
-    var data2 = JSON.parse(resp2.body);
+    var data2;
+    try {
+      data2 = JSON.parse(resp2.body);
+    } catch (e) {
+      throw new Error("hkey report 返回非 JSON (HTTP " + resp2.status + ")");
+    }
     if (data2.status !== "ok" || !data2.result) {
       throw new Error("hkey report 失败: " + resp2.body.slice(0, 200));
     }
@@ -390,7 +456,7 @@ async function signAccount(account) {
   var signExp = 0;
   var signCoin = 0;
   var signLine = "";
-  var tasks = {};
+  var tasks = { byId: {}, byTitle: {}, all: [] };
   var user = null;
   var beforeUser = null;
   // 连签天数：从 sign_list 从尾部数连续 is_sign=true（含补签）
@@ -422,17 +488,7 @@ async function signAccount(account) {
     var list = await signedGet(account, "/task/list_v2/");
     if (list.status === "ok" && list.result) {
       if (list.result.task_list) {
-        for (var i = 0; i < list.result.task_list.length; i++) {
-          var group = list.result.task_list[i];
-          for (var j = 0; j < (group.tasks || []).length; j++) {
-            var t = group.tasks[j];
-            // 存 {state, award:{exp,coin,battery}}，奖励从 award_desc_v2 按 icon 解析
-            tasks[t.title] = {
-              state: t.state,
-              award: parseAwards(t.award_desc_v2)
-            };
-          }
-        }
+        tasks = indexDailyTasks(list.result.task_list);
       }
       if (list.result.user) {
         user = list.result.user;
@@ -509,20 +565,24 @@ async function signAccount(account) {
 
   // 任务状态日志（逐行）
   log("#### 检查任务进行状况");
-  var taskKeys = Object.keys(tasks);
-  for (var k = 0; k < taskKeys.length; k++) {
-    var tInfo = tasks[taskKeys[k]];
-    var st = tInfo && tInfo.state;
+  for (var k = 0; k < tasks.all.length; k++) {
+    var tInfo = tasks.all[k];
+    var st = tInfo.state;
     var icon = st === "finish" ? "✅" : (st === "waiting" ? "⏳" : "⬜");
     var suffix = st === "finish" ? " 已完成" : st === "waiting" ? " 待执行" : " (" + st + ")";
-    log("- " + icon + " " + taskKeys[k] + suffix);
+    log("- " + icon + " " + tInfo.title + suffix);
   }
 
-  // 3. 每日经验：签到经验 + 任务经验（任务经验从 award_desc_v2 实读，不再硬编码 30）
+  // 3. 每日经验：签到经验 + 每日任务组经验
+  //    注意：签到任务本身也在「每日任务」组里（type=sign，award 同样记 +60经验），
+  //    必须排除，否则 signExp 与它叠加会把签到算两次（旧版 dailyExp 恒偏大）。
   var dailyExpTask = 0;
-  for (var dk = 0; dk < taskKeys.length; dk++) {
-    var dInfo = tasks[taskKeys[dk]];
-    if (dInfo && dInfo.award) dailyExpTask += dInfo.award.exp;
+  for (var dk = 0; dk < tasks.all.length; dk++) {
+    var dInfo = tasks.all[dk];
+    if (!dInfo || !dInfo.award) continue;
+    if (dInfo.type === "sign") continue;             // 签到奖励已由 signExp 计入
+    if (dInfo.group.indexOf("每日任务") === -1) continue; // 只算每日任务组
+    dailyExpTask += dInfo.award.exp;
   }
   if (enableTasks && dailyExpTask === 0) dailyExpTask = 30; // 接口无奖励数据时兜底
   var dailyExp = (signExp || 0) + (enableTasks ? dailyExpTask : 0);
@@ -536,13 +596,13 @@ async function signAccount(account) {
     try {
       // 任务标题 → 执行函数。原来是三段复制粘贴，现在数据驱动（新增任务只加一行）
       var runners = [
-        { title: "分享任意帖子到社交平台", label: "分享帖子", fn: taskSharePost },
-        { title: "分享游戏详情到社交平台", label: "分享游戏详情", fn: taskShareGameDetail },
-        { title: "分享游戏评价到社交平台", label: "分享游戏评价", fn: taskShareGameComment }
+        { id: TASK_IDS.POST, title: "分享任意帖子到社交平台", label: "分享帖子", fn: taskSharePost },
+        { id: TASK_IDS.GAME_DETAIL, title: "分享游戏详情到社交平台", label: "分享游戏详情", fn: taskShareGameDetail },
+        { id: TASK_IDS.GAME_COMMENT, title: "分享游戏评价到社交平台", label: "分享游戏评价", fn: taskShareGameComment }
       ];
       for (var ri = 0; ri < runners.length; ri++) {
         var runner = runners[ri];
-        if (((tasks[runner.title] || {}).state) !== "waiting") {
+        if (taskState(tasks, runner.id, runner.title) !== "waiting") {
           log("- 今日" + runner.label + "任务已完成");
           continue;
         }
@@ -582,30 +642,34 @@ async function signAccount(account) {
           afterUser = { exp: _l.exp, coin: _l.coin, battery: _u.battery, level: _l.level };
           user = _u; // 用最新的用户信息输出，避免显示执行前的旧值
         }
-        var waitingCount = 0;
-        for (var i2 = 0; i2 < (finalTasks || []).length; i2++) {
-          var g2 = finalTasks[i2];
-          for (var j2 = 0; j2 < (g2.tasks || []).length; j2++) {
-            if (g2.tasks[j2].state === "waiting") waitingCount++;
-          }
+        // 只等我们真能完成的任务（分享三件），而不是全部 waiting——
+        // 「灵感推荐」等分组永远 waiting，原来的写法会白等满 3 轮
+        var pending = 0;
+        for (var pi2 = 0; pi2 < runners.length; pi2++) {
+          if (taskState(tasks, runners[pi2].id, runners[pi2].title) !== "finish") pending++;
         }
-        if (waitingCount === 0 || w === 2) break;
+        if (pending === 0 || w === 2) break;
         await sleep(3000);
       }
       if (finalTasks) {
-        var done = 0, total = 0, rebuilt = {};
-        for (var i3 = 0; i3 < finalTasks.length; i3++) {
-          var g3 = finalTasks[i3];
+        var done = 0, total = 0;
+        // 进度只看「每日任务」分组（脚本实际操作的那组），避免被不相关分组拉低；
+        // 分组标题变了就退回统计全部
+        var progressGroups = [];
+        for (var gi3 = 0; gi3 < finalTasks.length; gi3++) {
+          if ((finalTasks[gi3].title || "").indexOf("每日任务") !== -1) progressGroups.push(finalTasks[gi3]);
+        }
+        if (!progressGroups.length) progressGroups = finalTasks;
+        for (var i3 = 0; i3 < progressGroups.length; i3++) {
+          var g3 = progressGroups[i3];
           for (var j3 = 0; j3 < (g3.tasks || []).length; j3++) {
-            var _t3 = g3.tasks[j3];
             total++;
-            if (_t3.state === "finish") done++;
-            // 本次刚完成的任务，执行前是 waiting，只有这里才是 finish
-            rebuilt[_t3.title] = { state: _t3.state, award: parseAwards(_t3.award_desc_v2) };
+            if (g3.tasks[j3].state === "finish") done++;
           }
         }
         taskProgress = "📊 任务进度 · " + done + "/" + total;
-        tasks = rebuilt;
+        // 本次刚完成的任务，执行前是 waiting，只有这里才是 finish
+        tasks = indexDailyTasks(finalTasks);
       }
     } catch (e) {
       log("- ⚠️ 任务结算异常: " + e.message);
@@ -638,8 +702,8 @@ async function signAccount(account) {
     // 兜底：累加「每日任务」组里已完成任务的 award_desc_v2
     // 关键：签到本身就是该组里的一个任务（type="sign"），不能再叠加 sign_in_exp/sign_in_coin，
     //      否则签到会被算两次。
-    for (var tk in tasks) {
-      var tInf = tasks[tk];
+    for (var tk = 0; tk < tasks.all.length; tk++) {
+      var tInf = tasks.all[tk];
       if (!tInf || !tInf.award) continue;
       if (tInf.state !== "finish") continue;
       gotExp += tInf.award.exp;
@@ -671,7 +735,7 @@ async function signAccount(account) {
   if (streak > 0) lines.push("🔥 连续签到: " + streak + "天");
   lines.push(gainLine);
   // 任务执行摘要
-  if (enableTasks && Object.keys(tasks).length) {
+  if (enableTasks && tasks.all.length) {
     if (taskResults.length) {
       for (var tr = 0; tr < taskResults.length; tr++) lines.push(taskResults[tr]);
     } else {
