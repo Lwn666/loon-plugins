@@ -34,6 +34,7 @@
 - **H币 / 盒电 / 等级 / 经验进度**：实时余额（取自 `list_v2` 的 `user.level_info` / `user.battery`）
 - **连签天数**：从 `/task/sign_list/` 尾部连续 `is_sign=true` 统计（含补签，与 App 一致）
 - **今日获得**：以「执行前 → 执行后」用户信息差值为准（接口真实值），差值不可用时退回按 `award_desc_v2` 累加
+- **任务进度**：只统计「每日任务」分组（脚本实际操作的那组），不含「灵感推荐」等无法自动完成的分组
 - **升级约 X 天**：按今日实际所得推算
 
 > 💡 **连签翻倍**：连续签到 7 天以上，签到奖励的经验和 H 币翻倍（30 → 60）。
@@ -83,9 +84,11 @@
 
 每日任务通过**加密事件上报**（mode=report → data.xiaoheihe.cn）完成分享类任务：
 
-- **分享帖子**：拉取帖子流 → view_time 上报 → 分享点击 → tap/success 事件
-- **分享游戏详情**：拉取游戏推荐 → tap/success 事件（src=game_detail）
-- **分享游戏评价**：拉取游戏评论 → tap/success 事件（src=game_comment）
+- **分享帖子**（`task_id=1`）：拉取帖子流 → view_time 上报 → 分享点击 → tap/success 事件
+- **分享游戏详情**（`task_id=19`）：拉取游戏推荐 → tap/success 事件（src=game_detail）
+- **分享游戏评价**（`task_id=31`）：拉取游戏评论 → tap/success 事件（src=game_comment）
+
+任务状态按 `report_extra.task_id` 匹配，**不依赖中文标题**——服务端改文案不会导致任务被跳过。
 
 > ⚠️ 任务需要 30~60s 完成（含等待结算），插件 timeout 已设为 180s。
 > ⚠️ 单账号时间预算默认 70s，超出会跳过剩余任务（次日补跑），避免多账号时整个脚本被 Loon 强杀导致通知都发不出。
@@ -99,7 +102,7 @@
 1. 调用 `hkey.qcciii.com/hkey` 签名服务，传入 `path + time + imei + heybox_id` 获取实时 `hkey` + `version/build`
 2. 用返回的签名构造合法请求，调用签到接口
 
-⚠️ **依赖第三方服务**：签名服务为社区共享（非本项目维护），若失效会报「hkey 服务失败」。
+⚠️ **依赖第三方服务**：签名服务为社区共享（非本项目维护）。若失效会推送「签名服务不可用」通知（不会静默失败）。
 ⚠️ 签名绑定 `_time`，请求必须用与换签时相同的秒级时间戳，否则服务端返回「非法请求」。
 
 ## 接口清单
@@ -110,6 +113,8 @@
 | `/task/sign_v3/get_sign_state` | 查询签到状态（`sign_in_exp` / `sign_in_coin` / `sign_in_streak`）|
 | `/task/sign_list/` | 签到日历（算连签天数）|
 | `/task/list_v2/` | 任务列表 + 用户信息（H币/盒电/等级/经验）|
+
+`list_v2` 的 `task_list[].tasks[]` 关键字段：`title` / `type` / `state`（`finish`|`waiting`）/ `report_extra.task_id` / `award_desc_v2[]`。奖励币种靠 `award_desc_v2[].icon` 文件名区分（经验 `b9aca51c…` / H币 `c10d89ae…` / 盒电 `e63b192a…`），`desc` 为 `+数字` 才是奖励。
 
 ## 免责声明
 
