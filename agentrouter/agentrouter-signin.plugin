@@ -1,5 +1,5 @@
 #!name=AgentRouter 每日签到
-#!desc=agentrouter.org 中转站每日自动签到（登录即签到，每日领 $25 额度），8-12 点随机时间执行，支持多账号，结果推送通知。
+#!desc=agentrouter.org 中转站每日自动签到（登录即签到，每日领 $25 额度），8-12 点随机时间执行，支持多账号，主域名失败自动切备用域名 ps.air-outer.com，结果推送通知。
 #!author=Minis
 #!homepage=https://github.com/Lwn666/loon-plugins/tree/main/agentrouter
 #!icon=https://agentrouter.org/favicon.ico
@@ -39,12 +39,14 @@
 [Argument]
 ACCOUNTS=input,"",tag=账号,desc=每行一个账号 邮箱和密码中间用井号连接 多账号换行或分号分隔
 RANDOM_WINDOW=input,"08:00-12:00",tag=随机时间窗口,desc=格式 起始-结束 如 08:00-12:00。在此区间内随机选一个时刻执行
-FORCE=switch,false,tag=立即执行,desc=开启后忽略随机窗口 立即签到（测试用）
+FORCE=switch,false,tag=立即执行,desc=开启后忽略随机窗口 立即签到（测试用 记得关）
+MANUAL_RUN=switch,true,tag=手动触发立即执行,desc=首页手动点「手动签到」时忽略随机窗口直接跑 定时轮询不受影响
 DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
 
 [Script]
-# 随机时间签到：每 15 分钟轮询，脚本内判断是否到达当天随机时间
+# 定时轮询：每 15 分钟检查一次，到达当天随机时间才真正签到
+# 注意：本条不传 MANUAL_RUN，脚本据此识别为定时轮询
 cron "*/15 8-12 * * *" then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${RANDOM_WINDOW}, ${FORCE}, ${DEBUG}}) with tag="AgentRouter 自动签到", timeout=120, enable=true, debug=${DEBUG}
 
-# 手动触发（忽略随机窗口）
-generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${RANDOM_WINDOW}, ${FORCE}, ${DEBUG}}) with tag="AgentRouter 手动签到", img_url="arrow.clockwise", timeout=120, enable=true, debug=${DEBUG}
+# 首页手动触发：传 MANUAL_RUN，忽略随机窗口与当日状态，立即执行并推送通知
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/agentrouter/agentrouter-signin.js", {${ACCOUNTS}, ${RANDOM_WINDOW}, ${FORCE}, ${DEBUG}, ${MANUAL_RUN}}) with tag="AgentRouter 手动签到", img_url="arrow.clockwise", timeout=120, enable=true, debug=${DEBUG}
