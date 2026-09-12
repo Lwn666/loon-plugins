@@ -292,14 +292,20 @@ function login(acct, dbg, cb) {
 
         // 成功：记住可用域名，后续请求优先使用
         try { $persistentStore.write(base, STORE_BASE); } catch (e) {}
+
+        // 兼容两种响应结构：
+        //   扁平（本站实测）：data.id / data.quota / data.checked_in / data.access_token
+        //   包装（官方文档）：data.user.id + data.access_token
         var d = j.data || {};
+        var u = (d.user && typeof d.user === "object") ? d.user : d;
         cb({
           ok: true,
           base: base,
-          uid: d.id,
-          username: d.username || d.display_name || acct.email,
-          quota: d.quota,
-          checkedIn: !!d.checked_in,
+          uid: u.id || d.id,
+          accessToken: d.access_token || "",
+          username: u.username || u.display_name || acct.email,
+          quota: (u.quota !== undefined ? u.quota : d.quota),
+          checkedIn: !!(u.checked_in !== undefined ? u.checked_in : d.checked_in),
         });
       }
     );
@@ -307,82 +313,130 @@ function login(acct, dbg, cb) {
   attempt();
 }
 
-// 回查个人日志，确认签到记录（优先用登录成功的域名，失败换备用）
-function verifyCheckin(uid, base, dbg, cb) {
+// 查询用户信息（拿真实余额；同时验证 token 是否可用）
+function fetchSelf(base, token, uid, dbg, cb) {
+  if (!base || !token || !uid) return cb(null);
+  $httpClient.get(
+    {
+      url: base + "/api/user/self",
+      headers: {
+        "User-Agent": UA,
+        Accept: "application/json",
+        Authorization: "Bearer " + token,
+        "New-Api-User": String(uid),
+      },
+      timeout: TIMEOUT,
+    },
+    function (err, resp, data) {
+      if (err) { if (dbg) log("self 查询异常：" + err); return cb(null); }
+      var text = toStr(data);
+      if (text.charAt(0) === "<") { if (dbg) log("self 被 WAF 拦截"); return cb(null); }
+      var j = jsonTry(text);
+      if (!j || !j.success || !j.data) { if (dbg) log("self 返回异常"); return cb(null); }
+      if (dbg) log("self OK quota=" + j.data.quota);
+      cb(j.data);
+    }
+  );
+}
+
+// 回查个人日志，确认签到记录（用 Bearer token 鉴权，失败换备用域名）
+function verifyCheckin(uid, base, token, dbg, cb) {
   if (!uid) return cb({ level: "error", detail: "缺少 uid，跳过日志核验" });
+  if (!token) return cb({ level: "error", detail: "登录响应未含 access_token，无法核验日志" });
 
   // 登录成功的域名排最前，另一个做兜底
-  var bases = base ? [base].concat(BASE_URLS.filter(function (b) { return b !== base; })) : BASE_URLS.slice();
+  var bases = base
+    ? [base].concat(BASE_URLS.filter(function (b) { return b !== base; }))
+    : BASE_URLS.slice();
   var i = 0;
 
   function attempt() {
-    if (i >= bases.length) return cb({ level: "error", detail: "日志查询异常：所有域名均失败" });
+    if (i >= bases.length) {
+      return cb({ level: "error", detail: "所有域名日志查询均失败" });
+    }
+    var host = bases[i].replace(/^https?:\/\//, "");
+
     $httpClient.get(
       {
         url: bases[i] + LOG_PATH + "?p=1&page_size=20",
         headers: {
           "User-Agent": UA,
           Accept: "application/json",
+          Authorization: "Bearer " + token,
           "New-Api-User": String(uid),
         },
         timeout: TIMEOUT,
       },
       function (err, resp, data) {
         if (err) {
-          log("日志查询 [" + bases[i].replace(/^https?:\/\//, "") + "] 异常：" + err + "，尝试备用域名");
+          log("日志查询 [" + host + "] 异常：" + err + "，尝试备用域名");
           i++;
           return attempt();
         }
+
         var text = toStr(data);
-        if (dbg) log("log [" + bases[i].replace(/^https?:\/\//, "") + "] HTTP " + (resp ? resp.status : 0) + " -> " + text.slice(0, 200));
-        if (text.indexOf("<") === 0 || !jsonTry(text) || !jsonTry(text).data) {
-          log("日志查询 [" + bases[i].replace(/^https?:\/\//, "") + "] 返回异常，尝试备用域名");
+        var status = resp ? resp.status : 0;
+        if (dbg) log("log [" + host + "] HTTP " + status + " -> " + text.slice(0, 200));
+
+        if (text.charAt(0) === "<") {
+          log("日志查询 [" + host + "] 被 WAF 拦截，尝试备用域名");
           i++;
           return attempt();
         }
 
         var j = jsonTry(text);
-        var items = j.data.items || [];
-      var now = Math.floor(Date.now() / 1000);
-      var newestTs = null,
-        newestContent = "";
-
-      items.forEach(function (it) {
-        var c = it.content || "";
-        if (c.indexOf("签到成功") >= 0 || Number(it.type) === 4) {
-          var ts = Number(it.created_at);
-          if (!isNaN(ts) && (newestTs === null || ts > newestTs)) {
-            newestTs = ts;
-            newestContent = c;
-          }
+        if (!j || !j.data) {
+          var why = j && j.message ? j.message : text.slice(0, 80);
+          log("日志查询 [" + host + "] 返回异常：" + why + "，尝试备用域名");
+          i++;
+          return attempt();
         }
-      });
 
-      if (newestTs === null) {
-        return cb({ level: "none", detail: "日志中未找到签到记录" });
-      }
-      if (newestTs >= now - 300) {
-        return cb({
-          level: "new",
-          detail: "本次运行已生成签到日志（" + ago(newestTs) + "）",
-          content: newestContent,
-        });
-      }
-      if (newestTs >= now - 86400) {
-        return cb({
-          level: "today",
-          detail: "今日更早已签到（" + ago(newestTs) + "），本次未新增",
-          content: newestContent,
-        });
-      }
-      return cb({
-        level: "none",
-        detail: "最近一条签到日志较旧（" + ago(newestTs) + "）",
-        content: newestContent,
-      });
+        return evalItems(j.data.items || []);
       }
     );
   }
+
+  function evalItems(items) {
+    var now = Math.floor(Date.now() / 1000);
+    var newestTs = null;
+    var newestContent = "";
+
+    items.forEach(function (it) {
+      var c = it.content || "";
+      if (c.indexOf("签到成功") >= 0 || Number(it.type) === 4) {
+        var ts = Number(it.created_at);
+        if (!isNaN(ts) && (newestTs === null || ts > newestTs)) {
+          newestTs = ts;
+          newestContent = c;
+        }
+      }
+    });
+
+    if (newestTs === null) {
+      return cb({ level: "none", detail: "日志中未找到签到记录" });
+    }
+    if (newestTs >= now - 300) {
+      return cb({
+        level: "new",
+        detail: "本次运行已生成签到日志（" + ago(newestTs) + "）",
+        content: newestContent,
+      });
+    }
+    if (newestTs >= now - 86400) {
+      return cb({
+        level: "today",
+        detail: "今日更早已签到（" + ago(newestTs) + "），本次未新增",
+        content: newestContent,
+      });
+    }
+    return cb({
+      level: "none",
+      detail: "最近一条签到日志较旧（" + ago(newestTs) + "）",
+      content: newestContent,
+    });
+  }
+
   attempt();
 }
 
@@ -402,29 +456,37 @@ function runAccount(acct, dbg, done) {
       });
     }
 
-    if (!r.checkedIn) {
-      log(acct.name + " 🟡 登录成功但 checked_in=false（今日额度可能已发或接口变化）");
-      return done({
-        name: acct.name,
-        email: acct.email,
-        status: "success",
-        msg: "登录成功，checked_in=false（可能今日额度已发）",
-        quota: r.quota,
-      });
-    }
+    // 登录成功：先查 self 拿真实余额（登录响应的 quota 可能缺失或为 0）
+    fetchSelf(r.base, r.accessToken, r.uid, dbg, function (selfData) {
+      var quota = (selfData && selfData.quota !== undefined) ? selfData.quota : r.quota;
+      var checkedIn = selfData && selfData.checked_in !== undefined
+        ? !!selfData.checked_in
+        : r.checkedIn;
 
-    verifyCheckin(r.uid, r.base, dbg, function (v) {
-      var msg;
-      if (v.level === "new") msg = "签到成功，日志已确认（" + v.detail + "）";
-      else if (v.level === "today") msg = "签到成功（" + v.detail + "）";
-      else msg = "登录成功且已签到，日志未确认：" + v.detail;
-      log(acct.name + " ✅ " + msg + " | 额度 " + fmtQuota(r.quota));
-      done({
-        name: acct.name,
-        email: acct.email,
-        status: "success",
-        msg: msg,
-        quota: r.quota,
+      if (!checkedIn) {
+        log(acct.name + " 🟡 登录成功但 checked_in=false（今日额度可能已发或接口变化）");
+        return done({
+          name: acct.name,
+          email: acct.email,
+          status: "success",
+          msg: "登录成功，checked_in=false（可能今日额度已发）",
+          quota: quota,
+        });
+      }
+
+      verifyCheckin(r.uid, r.base, r.accessToken, dbg, function (v) {
+        var msg;
+        if (v.level === "new") msg = "签到成功，日志已确认（" + v.detail + "）";
+        else if (v.level === "today") msg = "签到成功（" + v.detail + "）";
+        else msg = "登录成功且已签到（日志未确认：" + v.detail + "）";
+        log(acct.name + " ✅ " + msg + " | 额度 " + fmtQuota(quota));
+        done({
+          name: acct.name,
+          email: acct.email,
+          status: "success",
+          msg: msg,
+          quota: quota,
+        });
       });
     });
   });
