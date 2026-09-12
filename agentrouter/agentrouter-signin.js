@@ -26,6 +26,15 @@
  *   - 成功后记录日期，当天剩余轮询静默退出
  *   窗口与轮询表达式均可在插件参数中调整。
  *
+ * 【备用域名】
+ * 官方备用域名 https://ps.air-outer.com 与主域名功能完全一致。
+ * 主域名网络错误 / 被 WAF 拦截时自动切换备用域名重试，
+ * 成功后记住可用域名，后续请求优先使用。
+ *
+ * 【手动触发】
+ * Loon 首页 generic 脚本传入 MANUAL_RUN=true：
+ *   忽略随机窗口与"今日已签到"状态，立即执行且始终推送通知。
+ *
  * 【插件参数】
  *   ACCOUNTS       单账号：邮箱#密码；多账号换行 / 分号分隔
  *   RANDOM_WINDOW  随机时间窗口，默认 "08:00-12:00"
@@ -36,7 +45,22 @@
  * ----------------------------------------------------------------
  */
 
-var BASE_URL = "https://agentrouter.org";
+// 主域名 + 备用域名（官方公告：ps.air-outer.com 与主域名功能完全一致）
+// 网络错误 / WAF 拦截时自动切换，成功后记住可用域名
+var BASE_URLS = ["https://agentrouter.org", "https://ps.air-outer.com"];
+var STORE_BASE = "agentrouter_base_url";
+
+function getBases() {
+  var list = BASE_URLS.slice();
+  var last = "";
+  try { last = $persistentStore.read(STORE_BASE) || ""; } catch (e) {}
+  if (last && list.indexOf(last) > 0) {
+    // 上次成功的域名排最前
+    list.splice(list.indexOf(last), 1);
+    list.unshift(last);
+  }
+  return list;
+}
 var LOGIN_PATH = "/api/user/login";
 var LOG_PATH = "/api/log/self";
 var TIMEOUT = 25000;
@@ -215,70 +239,110 @@ function ago(ts) {
 
 /* ========================= 接口调用 ========================= */
 
-// 登录即签到
+// 登录即签到（主域名失败自动切备用域名）
 function login(acct, dbg, cb) {
+  var bases = getBases();
   var body = JSON.stringify({ username: acct.email, password: acct.password });
-  $httpClient.post(
-    {
-      url: BASE_URL + LOGIN_PATH,
-      headers: {
-        "User-Agent": UA,
-        "Content-Type": "application/json",
-        Accept: "application/json, text/plain, */*",
-        Origin: BASE_URL,
-        Referer: BASE_URL + "/login",
-      },
-      body: body,
-      timeout: TIMEOUT,
-    },
-    function (err, resp, data) {
-      if (err) return cb({ ok: false, msg: "登录请求异常：" + err });
-      var text = toStr(data);
-      var status = resp ? resp.status : 0;
-      if (dbg) log("login HTTP " + status + " -> " + text.slice(0, 200));
+  var i = 0;
 
-      if (text.indexOf("<") === 0) {
-        return cb({ ok: false, msg: "被 WAF 拦截（返回 HTML），请稍后重试" });
-      }
-      var j = jsonTry(text);
-      if (!j) return cb({ ok: false, msg: "登录响应非 JSON：" + text.slice(0, 120) });
-      if (!j.success) {
-        return cb({ ok: false, msg: "登录失败：" + (j.message || text.slice(0, 120)) });
-      }
-
-      var d = j.data || {};
-      cb({
-        ok: true,
-        uid: d.id,
-        username: d.username || d.display_name || acct.email,
-        quota: d.quota,
-        checkedIn: !!d.checked_in,
-      });
+  function attempt() {
+    if (i >= bases.length) {
+      return cb({ ok: false, msg: "主域名与备用域名均不可达（网络错误或被拦截）" });
     }
-  );
+    var base = bases[i];
+    $httpClient.post(
+      {
+        url: base + LOGIN_PATH,
+        headers: {
+          "User-Agent": UA,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/plain, */*",
+          Origin: base,
+          Referer: base + "/login",
+        },
+        body: body,
+        timeout: TIMEOUT,
+      },
+      function (err, resp, data) {
+        // 网络层失败 / WAF HTML / 非 JSON → 换下一个域名重试
+        if (err) {
+          log("域名 " + base + " 请求异常：" + err + "，尝试备用域名");
+          i++;
+          return attempt();
+        }
+        var text = toStr(data);
+        var status = resp ? resp.status : 0;
+        if (dbg) log("login [" + base.replace(/^https?:\/\//, "") + "] HTTP " + status + " -> " + text.slice(0, 200));
+
+        if (text.indexOf("<") === 0) {
+          log("域名 " + base + " 被 WAF 拦截（返回 HTML），尝试备用域名");
+          i++;
+          return attempt();
+        }
+        var j = jsonTry(text);
+        if (!j) {
+          log("域名 " + base + " 返回非 JSON，尝试备用域名");
+          i++;
+          return attempt();
+        }
+        // JSON 响应正常但登录失败（密码错误等）→ 不再换域名，直接返回
+        if (!j.success) {
+          return cb({ ok: false, msg: "登录失败：" + (j.message || text.slice(0, 120)) });
+        }
+
+        // 成功：记住可用域名，后续请求优先使用
+        try { $persistentStore.write(base, STORE_BASE); } catch (e) {}
+        var d = j.data || {};
+        cb({
+          ok: true,
+          base: base,
+          uid: d.id,
+          username: d.username || d.display_name || acct.email,
+          quota: d.quota,
+          checkedIn: !!d.checked_in,
+        });
+      }
+    );
+  }
+  attempt();
 }
 
-// 回查个人日志，确认签到记录
-function verifyCheckin(uid, dbg, cb) {
+// 回查个人日志，确认签到记录（优先用登录成功的域名，失败换备用）
+function verifyCheckin(uid, base, dbg, cb) {
   if (!uid) return cb({ level: "error", detail: "缺少 uid，跳过日志核验" });
-  $httpClient.get(
-    {
-      url: BASE_URL + LOG_PATH + "?p=1&page_size=20",
-      headers: {
-        "User-Agent": UA,
-        Accept: "application/json",
-        "New-Api-User": String(uid),
-      },
-      timeout: TIMEOUT,
-    },
-    function (err, resp, data) {
-      if (err) return cb({ level: "error", detail: "日志查询异常：" + err });
-      var text = toStr(data);
-      if (dbg) log("log HTTP " + (resp ? resp.status : 0) + " -> " + text.slice(0, 200));
-      var j = jsonTry(text);
-      if (!j || !j.data) return cb({ level: "error", detail: "日志接口返回异常" });
 
-      var items = j.data.items || [];
+  // 登录成功的域名排最前，另一个做兜底
+  var bases = base ? [base].concat(BASE_URLS.filter(function (b) { return b !== base; })) : BASE_URLS.slice();
+  var i = 0;
+
+  function attempt() {
+    if (i >= bases.length) return cb({ level: "error", detail: "日志查询异常：所有域名均失败" });
+    $httpClient.get(
+      {
+        url: bases[i] + LOG_PATH + "?p=1&page_size=20",
+        headers: {
+          "User-Agent": UA,
+          Accept: "application/json",
+          "New-Api-User": String(uid),
+        },
+        timeout: TIMEOUT,
+      },
+      function (err, resp, data) {
+        if (err) {
+          log("日志查询 [" + bases[i].replace(/^https?:\/\//, "") + "] 异常：" + err + "，尝试备用域名");
+          i++;
+          return attempt();
+        }
+        var text = toStr(data);
+        if (dbg) log("log [" + bases[i].replace(/^https?:\/\//, "") + "] HTTP " + (resp ? resp.status : 0) + " -> " + text.slice(0, 200));
+        if (text.indexOf("<") === 0 || !jsonTry(text) || !jsonTry(text).data) {
+          log("日志查询 [" + bases[i].replace(/^https?:\/\//, "") + "] 返回异常，尝试备用域名");
+          i++;
+          return attempt();
+        }
+
+        var j = jsonTry(text);
+        var items = j.data.items || [];
       var now = Math.floor(Date.now() / 1000);
       var newestTs = null,
         newestContent = "";
@@ -316,8 +380,10 @@ function verifyCheckin(uid, dbg, cb) {
         detail: "最近一条签到日志较旧（" + ago(newestTs) + "）",
         content: newestContent,
       });
-    }
-  );
+      }
+    );
+  }
+  attempt();
 }
 
 /* ========================= 单账号流程 ========================= */
@@ -347,7 +413,7 @@ function runAccount(acct, dbg, done) {
       });
     }
 
-    verifyCheckin(r.uid, dbg, function (v) {
+    verifyCheckin(r.uid, r.base, dbg, function (v) {
       var msg;
       if (v.level === "new") msg = "签到成功，日志已确认（" + v.detail + "）";
       else if (v.level === "today") msg = "签到成功（" + v.detail + "）";
@@ -367,18 +433,24 @@ function runAccount(acct, dbg, done) {
 /* ========================= 随机时间闸门 ========================= */
 
 // 返回 true 表示本次应当执行签到
-function shouldRunNow(args, dbg) {
+// forced=true：手动触发，忽略随机窗口与"今日已签到"，直接执行
+function shouldRunNow(args, dbg, forced) {
   var today = todayStr();
 
-  // 今天已签到成功 → 静默退出
+  if (forced) {
+    log("手动触发，忽略随机窗口与当日状态，立即执行");
+    return true;
+  }
+
+  // 今天已签到成功 → 静默退出（cron 轮询，避免重复签到）
   if ($persistentStore.read(STORE_DATE) === today) {
-    if (dbg) log("今日已签到，跳过本轮轮询");
+    log("今日已签到，跳过本轮轮询");
     return false;
   }
 
   // 手动强制
   if (String(args.FORCE) === "true" || args.FORCE === true) {
-    if (dbg) log("FORCE 已开启，忽略随机窗口立即执行");
+    log("FORCE 已开启，忽略随机窗口立即执行");
     return true;
   }
 
@@ -395,7 +467,7 @@ function shouldRunNow(args, dbg) {
   }
 
   if (now < target) {
-    if (dbg) log("当前 " + nowS + "，未到随机时间 " + fmtMin(target) + "，等待下一轮");
+    log("当前 " + nowS + "，未到随机时间 " + fmtMin(target) + "，等待下一轮（本轮不请求）");
     return false;
   }
 
@@ -408,6 +480,8 @@ function shouldRunNow(args, dbg) {
 function main() {
   var args = readArg();
   var dbg = String(args.DEBUG) === "true" || args.DEBUG === true;
+  // MANUAL_RUN 仅由 generic（首页手动触发）传入，用于区分手动与定时轮询
+  var isManual = args.MANUAL_RUN === true || String(args.MANUAL_RUN) === "true";
   var accounts = parseAccounts(args.ACCOUNTS);
 
   if (!accounts.length) {
@@ -416,11 +490,11 @@ function main() {
     return $done();
   }
 
-  // 随机时间闸门
-  if (!shouldRunNow(args, dbg)) return $done();
+  // 随机时间闸门（手动触发直接放行）
+  if (!shouldRunNow(args, dbg, isManual)) return $done();
 
   var today = todayStr();
-  log("AgentRouter 自动签到启动，共 " + accounts.length + " 个账号");
+  log("AgentRouter 自动签到启动，共 " + accounts.length + " 个账号" + (isManual ? "（手动触发）" : ""));
 
   var results = [];
   var idx = 0;
@@ -456,7 +530,7 @@ function main() {
       log("已记录今日签到完成（" + today + "）");
     }
 
-    var title = "AgentRouter 签到";
+    var title = "AgentRouter 签到" + (isManual ? "（手动）" : "");
     var subtitle =
       failCount === 0
         ? okCount + " 个账号全部成功"
@@ -465,9 +539,9 @@ function main() {
     log(subtitle);
     lines.forEach(log);
 
-    // 失败只在当天首次推送，避免轮询期内重复轰炸
+    // 失败只在当天首次推送，避免轮询期内重复轰炸（手动触发不受限）
     var shouldNotify = true;
-    if (failCount > 0 && $persistentStore.read(STORE_FAIL) === today) {
+    if (!isManual && failCount > 0 && $persistentStore.read(STORE_FAIL) === today) {
       shouldNotify = false;
       if (dbg) log("今日已推送过失败通知，跳过");
     }
@@ -475,6 +549,7 @@ function main() {
 
     if (shouldNotify) {
       $notification.post(title, subtitle, lines.join("\n"));
+      log("已推送通知");
     }
     $done();
   }
