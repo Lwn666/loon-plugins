@@ -62,7 +62,9 @@ function getBases() {
   return list;
 }
 var LOGIN_PATH = "/api/user/login";
-var LOG_PATH = "/api/log/self";
+var LOG_PATH = "/api/log/self";   // 不带尾斜杠：直连 200，带斜杠会 301
+var SELF_PATH = "/api/user/self";
+var USER_HEADER = "New-API-User"; // 站点鉴权头（大小写不敏感，与参考脚本一致）
 var TIMEOUT = 25000;
 var QUOTA_PER_UNIT = 500000; // 站点 /api/status 的 quota_per_unit：1 USD = 500000 quota
 
@@ -70,6 +72,7 @@ var QUOTA_PER_UNIT = 500000; // 站点 /api/status 的 quota_per_unit：1 USD = 
 var STORE_DATE = "agentrouter_signin_date";     // 最近一次签到成功的日期
 var STORE_TARGET = "agentrouter_signin_target"; // 当天随机时间点 YYYY-MM-DD:偏移分钟
 var STORE_FAIL = "agentrouter_fail_notified";   // 最近一次失败通知的日期
+var STORE_COOKIE = "agentrouter_cookie";         // 登录后捕获的会话 Cookie
 
 var UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) " +
@@ -228,6 +231,25 @@ function fmtQuota(q) {
   return "$" + (n / QUOTA_PER_UNIT).toFixed(2);
 }
 
+// 从用户对象解析 剩余/已用/总额（字段可能缺失）
+// total 优先取服务端 total_quota，缺失则用 剩余+已用 估算
+function parseQuota(u) {
+  if (!u || typeof u !== "object") return { remaining: null, used: null, total: null };
+  var rem = (u.quota === undefined || u.quota === null) ? null : Number(u.quota);
+  var used = (u.used_quota === undefined || u.used_quota === null) ? null : Number(u.used_quota);
+  var tot = (u.total_quota === undefined || u.total_quota === null) ? null : Number(u.total_quota);
+  if (isNaN(rem)) rem = null;
+  if (isNaN(used)) used = null;
+  if (isNaN(tot)) tot = null;
+  if (tot === null && rem !== null && used !== null) tot = rem + used;
+  return { remaining: rem, used: used, total: tot };
+}
+
+// 组装一行额度摘要
+function quotaLine(q) {
+  return "剩余 " + fmtQuota(q.remaining) + "｜已用 " + fmtQuota(q.used) + "｜总额 " + fmtQuota(q.total);
+}
+
 function ago(ts) {
   var d = Math.floor(Date.now() / 1000) - Number(ts);
   if (isNaN(d) || d < 0) return "";
@@ -238,6 +260,40 @@ function ago(ts) {
 }
 
 /* ========================= 接口调用 ========================= */
+
+// 从响应头里提取所有 Set-Cookie，拼成 Cookie 请求头
+// 与 ddgksf2013 参考脚本一致：关闭 auto-cookie，手动管理
+function extractCookie(resp) {
+  if (!resp || !resp.headers) return "";
+  var h = resp.headers;
+  var raw = h["Set-Cookie"] || h["set-cookie"] || "";
+  if (!raw) {
+    // 有些实现给数组
+    for (var k in h) {
+      if (String(k).toLowerCase() === "set-cookie") { raw = h[k]; break; }
+    }
+  }
+  if (!raw) return "";
+  var arr = (typeof raw === "string") ? [raw] : raw;
+  var parts = [];
+  for (var i = 0; i < arr.length; i++) {
+    // 只取 name=value，丢掉 Path/Expires 等属性
+    var seg = String(arr[i]).split(";")[0].trim();
+    if (seg) parts.push(seg);
+  }
+  return parts.join("; ");
+}
+
+// 组装鉴权请求头：Cookie + New-Api-User（缺一不可）
+function authHeaders(uid, cookie) {
+  var h = {
+    "User-Agent": UA,
+    Accept: "application/json",
+  };
+  h[USER_HEADER] = String(uid);
+  if (cookie) h["Cookie"] = cookie;
+  return h;
+}
 
 // 登录即签到（主域名失败自动切备用域名）
 function login(acct, dbg, cb) {
@@ -290,19 +346,27 @@ function login(acct, dbg, cb) {
           return cb({ ok: false, msg: "登录失败：" + (j.message || text.slice(0, 120)) });
         }
 
-        // 成功：记住可用域名，后续请求优先使用
+        // 成功：记住可用域名与 cookie，后续请求复用
         try { $persistentStore.write(base, STORE_BASE); } catch (e) {}
 
+        var cookie = extractCookie(resp);
+        if (cookie) {
+          try { $persistentStore.write(cookie, STORE_COOKIE); } catch (e) {}
+          if (dbg) log("已捕获 Set-Cookie：" + cookie.slice(0, 60) + "...");
+        } else if (dbg) {
+          log("登录响应未含 Set-Cookie，后续请求将只带 uid 头");
+        }
+
         // 兼容两种响应结构：
-        //   扁平（本站实测）：data.id / data.quota / data.checked_in / data.access_token
-        //   包装（官方文档）：data.user.id + data.access_token
+        //   扁平（本站实测）：data.id / data.quota / data.checked_in
+        //   包装（官方文档）：data.user.id
         var d = j.data || {};
         var u = (d.user && typeof d.user === "object") ? d.user : d;
         cb({
           ok: true,
           base: base,
+          cookie: cookie,
           uid: u.id || d.id,
-          accessToken: d.access_token || "",
           username: u.username || u.display_name || acct.email,
           quota: (u.quota !== undefined ? u.quota : d.quota),
           checkedIn: !!(u.checked_in !== undefined ? u.checked_in : d.checked_in),
@@ -313,36 +377,35 @@ function login(acct, dbg, cb) {
   attempt();
 }
 
-// 查询用户信息（拿真实余额；同时验证 token 是否可用）
-function fetchSelf(base, token, uid, dbg, cb) {
-  if (!base || !token || !uid) return cb(null);
+// 查询用户信息（拿真实余额；登录响应里的 quota 常缺失）
+function fetchSelf(base, uid, cookie, dbg, cb) {
+  if (!base || !uid) return cb(null);
   $httpClient.get(
     {
-      url: base + "/api/user/self",
-      headers: {
-        "User-Agent": UA,
-        Accept: "application/json",
-        Authorization: "Bearer " + token,
-        "New-Api-User": String(uid),
-      },
+      url: base + SELF_PATH,
+      headers: authHeaders(uid, cookie),
       timeout: TIMEOUT,
+      "auto-redirect": true,
     },
     function (err, resp, data) {
       if (err) { if (dbg) log("self 查询异常：" + err); return cb(null); }
       var text = toStr(data);
       if (text.charAt(0) === "<") { if (dbg) log("self 被 WAF 拦截"); return cb(null); }
       var j = jsonTry(text);
-      if (!j || !j.success || !j.data) { if (dbg) log("self 返回异常"); return cb(null); }
-      if (dbg) log("self OK quota=" + j.data.quota);
+      if (!j || !j.success || !j.data) {
+        if (dbg) log("self 返回异常：" + (j && j.message ? j.message : text.slice(0, 80)));
+        return cb(null);
+      }
+      if (dbg) log("self OK quota=" + j.data.quota + " checked_in=" + j.data.checked_in);
       cb(j.data);
     }
   );
 }
 
-// 回查个人日志，确认签到记录（用 Bearer token 鉴权，失败换备用域名）
-function verifyCheckin(uid, base, token, dbg, cb) {
+// 回查个人日志，确认签到记录（Cookie + New-Api-User 鉴权，失败换备用域名）
+function verifyCheckin(uid, base, cookie, dbg, cb) {
   if (!uid) return cb({ level: "error", detail: "缺少 uid，跳过日志核验" });
-  if (!token) return cb({ level: "error", detail: "登录响应未含 access_token，无法核验日志" });
+  // cookie 可选：没有也照常请求（部分部署不校验 cookie，只看 uid 头）
 
   // 登录成功的域名排最前，另一个做兜底
   var bases = base
@@ -359,13 +422,9 @@ function verifyCheckin(uid, base, token, dbg, cb) {
     $httpClient.get(
       {
         url: bases[i] + LOG_PATH + "?p=1&page_size=20",
-        headers: {
-          "User-Agent": UA,
-          Accept: "application/json",
-          Authorization: "Bearer " + token,
-          "New-Api-User": String(uid),
-        },
+        headers: authHeaders(uid, cookie),
         timeout: TIMEOUT,
+        "auto-redirect": true,
       },
       function (err, resp, data) {
         if (err) {
@@ -452,13 +511,16 @@ function runAccount(acct, dbg, done) {
         email: acct.email,
         status: "fail",
         msg: r.msg,
-        quota: null,
+        quota: { remaining: null, used: null, total: null },
       });
     }
 
+    // Cookie 兜底：响应头没给就复用上次存的
+    var cookie = r.cookie || ($persistentStore.read(STORE_COOKIE) || "");
+
     // 登录成功：先查 self 拿真实余额（登录响应的 quota 可能缺失或为 0）
-    fetchSelf(r.base, r.accessToken, r.uid, dbg, function (selfData) {
-      var quota = (selfData && selfData.quota !== undefined) ? selfData.quota : r.quota;
+    fetchSelf(r.base, r.uid, cookie, dbg, function (selfData) {
+      var quota = parseQuota(selfData || { quota: r.quota });
       var checkedIn = selfData && selfData.checked_in !== undefined
         ? !!selfData.checked_in
         : r.checkedIn;
@@ -474,12 +536,12 @@ function runAccount(acct, dbg, done) {
         });
       }
 
-      verifyCheckin(r.uid, r.base, r.accessToken, dbg, function (v) {
+      verifyCheckin(r.uid, r.base, cookie, dbg, function (v) {
         var msg;
         if (v.level === "new") msg = "签到成功，日志已确认（" + v.detail + "）";
         else if (v.level === "today") msg = "签到成功（" + v.detail + "）";
         else msg = "登录成功且已签到（日志未确认：" + v.detail + "）";
-        log(acct.name + " ✅ " + msg + " | 额度 " + fmtQuota(quota));
+        log(acct.name + " ✅ " + msg + " | " + quotaLine(quota));
         done({
           name: acct.name,
           email: acct.email,
@@ -583,7 +645,9 @@ function main() {
 
     var lines = results.map(function (r) {
       var tag = r.status === "success" ? "✅" : "❌";
-      return tag + " " + r.name + "：" + r.msg + " | 额度 " + fmtQuota(r.quota);
+      var line = tag + " " + r.name + "：" + r.msg;
+      if (r.status === "success") line += "\n  " + quotaLine(r.quota);
+      return line;
     });
 
     // 全部成功 → 记录日期，当天不再轮询
