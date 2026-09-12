@@ -261,27 +261,64 @@ function ago(ts) {
 
 /* ========================= 接口调用 ========================= */
 
-// 从响应头里提取所有 Set-Cookie，拼成 Cookie 请求头
-// 与 ddgksf2013 参考脚本一致：关闭 auto-cookie，手动管理
+// 从响应头提取全部 Set-Cookie，拼成 Cookie 请求头
+// 注意：站点会同时下发多个 cookie——acw_tc（阿里云 WAF 标记，每次请求都有）
+//       与 session（登录凭证，仅登录成功时下发）。顺序不固定，
+//       必须全部解析并确保 session 在内，否则会 401。
 function extractCookie(resp) {
   if (!resp || !resp.headers) return "";
   var h = resp.headers;
-  var raw = h["Set-Cookie"] || h["set-cookie"] || "";
-  if (!raw) {
-    // 有些实现给数组
+  var raws = [];
+
+  if (Object.prototype.toString.call(h) === "[object Array]") {
+    // Surge full-header-mode：[{field, value}, ...]
+    h.forEach(function (item) {
+      if (item && String(item.field || "").toLowerCase() === "set-cookie") {
+        if (Object.prototype.toString.call(item.value) === "[object Array]") {
+          raws = raws.concat(item.value);
+        } else if (item.value !== null && item.value !== undefined) {
+          raws.push(String(item.value));
+        }
+      }
+    });
+  } else {
     for (var k in h) {
-      if (String(k).toLowerCase() === "set-cookie") { raw = h[k]; break; }
+      if (String(k).toLowerCase() !== "set-cookie") continue;
+      var v = h[k];
+      if (Object.prototype.toString.call(v) === "[object Array]") {
+        raws = raws.concat(v);
+      } else if (v !== null && v !== undefined) {
+        raws.push(String(v));
+      }
     }
   }
-  if (!raw) return "";
-  var arr = (typeof raw === "string") ? [raw] : raw;
-  var parts = [];
-  for (var i = 0; i < arr.length; i++) {
-    // 只取 name=value，丢掉 Path/Expires 等属性
-    var seg = String(arr[i]).split(";")[0].trim();
-    if (seg) parts.push(seg);
-  }
-  return parts.join("; ");
+  if (!raws.length) return "";
+
+  // 单个 raw 可能含多个 cookie（Loon 可能把多个 Set-Cookie 合并成一串）
+  var pairs = [];
+  raws.forEach(function (raw) {
+    String(raw).split(/\r?\n/).forEach(function (line) {
+      // 按逗号切分多个 cookie（仅当逗号后跟 name= 时才切）
+      line.split(/,(?=\s*[^;,\s]+=)/).forEach(function (seg) {
+        var nv = seg.split(";")[0].trim();
+        if (/^[^=;\s]+=/.test(nv)) pairs.push(nv);
+      });
+    });
+  });
+  if (!pairs.length) return "";
+
+  // 按 cookie 名去重（保留最后一个），session 排最前
+  var map = {};
+  var order = [];
+  pairs.forEach(function (p) {
+    var name = p.split("=")[0];
+    if (!(name in map)) order.push(name);
+    map[name] = p;
+  });
+  var names = order.filter(function (n) { return n === "session"; })
+    .concat(order.filter(function (n) { return n !== "session"; }));
+
+  return names.map(function (n) { return map[n]; }).join("; ");
 }
 
 // 组装鉴权请求头：Cookie + New-Api-User（缺一不可）
