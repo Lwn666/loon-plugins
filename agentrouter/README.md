@@ -35,6 +35,30 @@ POST /api/user/login  {"username":"邮箱","password":"密码"}
 - 登录成功后记住可用域名，后续请求（含下次运行）优先使用
 - 认证失败（密码错误）**不**触发切换 —— 那是凭证问题，换域名没用
 
+## 鉴权方式（重要）
+
+本站登录响应**不含 `access_token`**（`data` 直接是用户对象），所以不能用 Bearer 方案。
+采用 Cookie + uid 头，与 ddgksf2013 参考脚本一致：
+
+```
+Cookie: <登录响应 Set-Cookie 提取>   ← 从响应头手动解析
+New-API-User: <uid>                  ← 缺则 401
+```
+
+- `auto-redirect: true`、`auto-cookie: false` —— 与参考脚本对齐，cookie 手动管理
+- 登录时从 `Set-Cookie` 提取 `name=value` 存本地，后续请求复用
+- 拿不到 cookie 也不阻断：仍带 uid 头请求，只是日志核验可能失败（**签到本身不受影响**）
+
+## 额度显示
+
+从 `/api/user/self` 解析三个字段，输出形如：
+
+```
+剩余 $124.93｜已用 $0.07｜总额 $125.00
+```
+
+`total_quota` 缺失时用 `剩余 + 已用` 估算。登录响应里的 `quota` 常缺失，故必须单独查 self。
+
 ## 插件参数
 
 | 参数 | 说明 |
