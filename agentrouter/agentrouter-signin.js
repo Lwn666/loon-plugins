@@ -421,7 +421,8 @@ function verifyCheckin(uid, base, cookie, dbg, cb) {
 
     $httpClient.get(
       {
-        url: bases[i] + LOG_PATH + "?p=1&page_size=20",
+        // 用 type=4 精确过滤签到日志（否则签到记录会被大量 API 调用日志挤出首页）
+        url: bases[i] + LOG_PATH + "?p=1&page_size=20&type=4",
         headers: authHeaders(uid, cookie),
         timeout: TIMEOUT,
         "auto-redirect": true,
@@ -461,9 +462,10 @@ function verifyCheckin(uid, base, cookie, dbg, cb) {
     var newestTs = null;
     var newestContent = "";
 
+    // 先只认内容含「签到成功」的（type=4 里还混着「新用户注册赠送」等，不能只靠 type）
     items.forEach(function (it) {
       var c = it.content || "";
-      if (c.indexOf("签到成功") >= 0 || Number(it.type) === 4) {
+      if (c.indexOf("签到成功") >= 0) {
         var ts = Number(it.created_at);
         if (!isNaN(ts) && (newestTs === null || ts > newestTs)) {
           newestTs = ts;
@@ -471,6 +473,18 @@ function verifyCheckin(uid, base, cookie, dbg, cb) {
         }
       }
     });
+
+    // 兜底：内容没匹配到，再看 type=4（应对措辞变化）
+    if (newestTs === null) {
+      items.forEach(function (it) {
+        if (Number(it.type) !== 4) return;
+        var ts = Number(it.created_at);
+        if (!isNaN(ts) && (newestTs === null || ts > newestTs)) {
+          newestTs = ts;
+          newestContent = it.content || "";
+        }
+      });
+    }
 
     if (newestTs === null) {
       return cb({ level: "none", detail: "日志中未找到签到记录" });
