@@ -25,6 +25,7 @@ https://raw.githubusercontent.com/Lwn666/loon-plugins/main/rcopy-signin/rcopy-si
 | 过期处理 | 脚本本地解析 JWT 预判过期；服务端失效时通知「凭证已失效」→ 重新打开小程序刷新 |
 
 凭证优先级：**自动捕获 → 插件参数 `phone`/`token`**。参数留空即可，捕获到的值会覆盖。
+手机号拿不到时会从 JWT payload 的 `login_<手机号>_WeChat:ios` 兜底解析。
 
 ## 参数
 
@@ -46,8 +47,21 @@ body: {"phone":"<11位手机号>","token":"<JWT>","system_type":"WeChat:ios"}
 ```
 
 - 必须带小程序 UA + `Referer: https://servicewechat.com/wx74846d51d020b58f/113/page-frame.html`
-- 服务端错误返回**纯文本**而非 JSON（实测 `token已经过期`），脚本对文本响应做关键词判定
-- 接口可达性：直连 HTTP 200，约 0.37s
+- 可达性：直连 HTTP 200 / 约 0.37s
+
+### 响应格式（两种形态，脚本均已适配）
+
+| 场景 | 响应 | HTTP |
+|---|---|---|
+| 签到成功 | `{"status":1,"msg":7,"data":null}` | 200 |
+| 凭证失效 | 纯文本 `token已经过期` | **200**（状态码不反映失败） |
+
+两个坑：
+
+1. **状态位是 `status` 不是 `code`**，且成功值 1 需显式判定
+2. **`msg` 是纯数字返回码**，不是提示文案 —— 直接当文字输出会打出「✅ 7」这种日志。
+   脚本对非字符串 `msg` 转成「服务端返回码 msg=7」，并顺带识别 `data` 里的天数/积分字段
+3. 失败响应是**纯文本**而非 JSON，必须做关键词判定（HTTP 200 不代表成功）
 
 ## 文件
 
