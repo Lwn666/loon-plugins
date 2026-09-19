@@ -21,7 +21,13 @@ function readArgRaw(name) {
     if (typeof $argument !== "undefined" && $argument !== null && $argument !== "") {
       var arg = $argument;
       if (typeof arg === "string") { try { arg = JSON.parse(arg); } catch (e) { return ""; } }
-      if (arg && typeof arg === "object" && !Array.isArray(arg)) {
+      if (arg && typeof arg === "object") {
+        if (Array.isArray(arg)) {
+          // 数组格式：顺序 = 插件 argument=[{phone},{token},{debug}] 的声明顺序
+          var idxMap = { phone: 0, token: 1, debug: 2 };
+          if (idxMap[name] !== undefined && arg[idxMap[name]] !== undefined) return String(arg[idxMap[name]]);
+          return "";
+        }
         if (arg[name] !== undefined) return String(arg[name]);
         for (var k in arg) {
           if (String(k).toLowerCase() === String(name).toLowerCase()) return String(arg[k]);
@@ -45,15 +51,31 @@ function validToken(t) {
 }
 
 function tokenExp(t) {
+  var payload = tokenPayload(t);
+  if (!payload) return 0;
+  var m = payload.match(/"exp"\s*:\s*(\d+)/);
+  if (m) return parseInt(m[1], 10) * 1000;
+  return 0;
+}
+
+/** 从 token payload 里兜底解析手机号（内容形如 {"0":{"login_18360095873_WeChat:ios":"18360095873"}}） */
+function phoneFromToken(t) {
+  var payload = tokenPayload(t);
+  if (!payload) return "";
+  var m = payload.match(/login_(\d{5,15})_/);
+  if (m) return m[1];
+  m = payload.match(/"(\d{11})"/);
+  return m ? m[1] : "";
+}
+
+function tokenPayload(t) {
   try {
     var p = String(t).split(".")[1];
+    if (!p) return "";
     p = p.replace(/-/g, "+").replace(/_/g, "/");
     while (p.length % 4 !== 0) p += "=";
-    var raw = base64Decode(p);
-    var m = raw.match(/"exp"\s*:\s*(\d+)/);
-    if (m) return parseInt(m[1], 10) * 1000;
-  } catch (e) {}
-  return 0;
+    return base64Decode(p);
+  } catch (e) { return ""; }
 }
 
 function base64Decode(b64) {
@@ -97,9 +119,20 @@ function main() {
     log("- 凭证来源: " + (token ? "插件参数" : "无"));
   }
 
-  if (!validToken(token) || !phone) {
-    log("- ❌ 缺少有效凭证（phone=" + (phone || "空") + "）");
+  if (!validToken(token)) {
+    log("- ❌ 缺少有效凭证");
     $notification.post("⚠️ Rcopy 签到", "缺少凭证", "请打开 Rcopy 小程序任意页面，凭证会自动捕获");
+    $done();
+    return;
+  }
+  if (!phone) {
+    // token payload 里内嵌手机号（login_<phone>_WeChat:ios），兜底补齐
+    phone = phoneFromToken(token);
+    if (phone) log("- 手机号从 token 兜底解析: " + phone);
+  }
+  if (!phone) {
+    log("- ❌ 有 token 但缺手机号");
+    $notification.post("⚠️ Rcopy 签到", "缺少手机号", "请在插件参数里填写手机号");
     $done();
     return;
   }
