@@ -1,0 +1,45 @@
+#!name=Rcopy 自动签到
+#!desc=Rcopy 小程序每日自动签到。打开小程序自动捕获凭证 定时静默签到并推送结果
+#!author=Minis
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/rcopy-signin/README.md
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/rcopy.png
+#!category=Sign
+#!system=iOS,iPadOS
+#!system_version=15
+#!loon_version=3.5.1(983)
+#!tag=签到,工具
+#!type=normal
+
+# ============================================================
+# Rcopy 自动签到
+#
+# 【凭证】打开 Rcopy 小程序（wx74846d51d020b58f）任意页面即自动
+#        截获请求体里的 phone + token 并存入本地，无需手动填写。
+#
+# 【有效期】token 由小程序登录态签发 大约 7 天过期。
+#        收到「凭证已失效」通知后重新打开一次小程序即可刷新。
+#
+# 【使用】装好插件后打开一次小程序完成凭证捕获，
+#        之后默认每天 08:00 自动签到，也可在 Loon 首页手动触发。
+# ============================================================
+
+[Argument]
+phone=input,"",tag=手机号,desc=微信小程序登录手机号 留空则使用自动捕获值
+token=input,"",tag=Token,desc=可留空 打开小程序会自动捕获并覆盖
+CRONEXP=input,"0 8 * * *",tag=签到时间,desc=默认每天08:00执行 可自行更改
+CAPTURE_ENABLE=switch,true,tag=凭证自动捕获,desc=打开小程序时自动更新凭证
+NOTICE=switch,true,tag=捕获时通知,desc=凭证更新时推送提醒
+DEBUG=switch,false,tag=调试模式,desc=输出详细日志
+
+[Script]
+# 凭证捕获：打开 Rcopy 小程序任意页面自动截获 phone + token
+request if ${url} ~= /^https:\/\/rcopy\.nikola-lab\.cn\/.+/i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/rcopy-signin/rcopy-capture.js", {${DEBUG}, ${NOTICE}}) with tag="Rcopy凭证捕获", timeout=20, requires_body=true, enable=${CAPTURE_ENABLE}
+
+# 定时签到（cron 表达式来自参数）
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/rcopy-signin/rcopy-signin.js", {${phone}, ${token}, ${DEBUG}}) with tag="Rcopy自动签到", timeout=60, enable=true, debug=${DEBUG}
+
+# 手动触发（Loon 首页点一下即跑，忽略 cron 时间）
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/rcopy-signin/rcopy-signin.js", {${phone}, ${token}, ${DEBUG}}) with tag="Rcopy立即签到", img_url="checkmark.seal", timeout=60, enable=true, debug=${DEBUG}
+
+[MITM]
+hostname = rcopy.nikola-lab.cn
