@@ -171,26 +171,51 @@ function main() {
     if (isDebug() && resp && resp.headers) log("- 响应头: " + JSON.stringify(resp.headers));
     log("- 响应: " + (text.length > 200 ? text.substring(0, 200) + "..." : text));
 
-    var ok = false, msg = text, expired = false;
-    try {
-      var j = JSON.parse(text);
-      msg = j.msg || j.message || j.info || text;
-      var code = j.code !== undefined ? j.code : j.status;
-      ok = (code === 0 || code === 1 || code === 200 || code === "0" || code === "1" || code === "200");
-    } catch (e) {
-      // 服务端实际返回纯文本（实测错误响应 "token已经过期"）
+    // 结果解析
+    // 实测成功响应: {"status":1,"msg":7,"data":null} —— 状态位是 status，
+    // msg 这里是纯数字而非提示文案，不能直接当文字输出（旧版会打出 "✅ 7"）
+    var ok = false, detail = "", note = "", expired = false;
+    var j = null;
+    try { j = JSON.parse(text); } catch (e) { j = null; }
+
+    if (j && typeof j === "object") {
+      var code = j.status !== undefined ? j.status : (j.code !== undefined ? j.code : undefined);
+      ok = (code === 0 || code === 1 || code === 200 || code === true ||
+            code === "0" || code === "1" || code === "200");
+
+      if (typeof j.msg === "string" && j.msg) detail = j.msg;
+      else if (typeof j.msg === "number") note = "服务端返回码 msg=" + j.msg;
+      if (!detail && typeof j.message === "string" && j.message) detail = j.message;
+      if (!detail && typeof j.info === "string" && j.info) detail = j.info;
+
+      // 顺手展示可能的天数/积分字段（存在才显示）
+      if (j.data && typeof j.data === "object") {
+        var dv = j.data.days || j.data.continuous_days || j.data.continue_days ||
+                 j.data.sign_days || j.data.integral || j.data.points;
+        if (dv !== undefined && dv !== null && dv !== "") {
+          note = (note ? note + " · " : "") + "服务端返回 " + dv;
+        }
+      }
+    } else {
+      // 服务端错误响应是纯文本（实测 "token已经过期"），HTTP 仍为 200
       var FAIL_RE = /(过期|失效|失败|异常|错误|非法|重新登录|请登录)/;
       ok = !FAIL_RE.test(text) && /(成功|已签到|已经签到|重复签到|完成)/.test(text);
+      detail = text;
     }
-    if (/过期|失效|未登录|重新登录|请登录/.test(msg)) expired = true;
+    if (/(过期|失效|未登录|重新登录|请登录)/.test(text)) expired = true;
 
-    log("- " + (ok ? "✅ " : "❌ ") + msg);
+    log("- " + (ok ? "✅ 签到成功" : "❌ 签到失败") +
+        (detail ? "：" + detail : "") + (note ? "（" + note + "）" : ""));
+
     if (expired) {
-      $notification.post("⚠️ Rcopy 签到", "凭证已失效", msg + "\n打开 Rcopy 小程序任意页面即可自动刷新凭证");
+      $notification.post("⚠️ Rcopy 签到", "凭证已失效",
+        (detail || text) + "\n打开 Rcopy 小程序任意页面即可自动刷新凭证");
+    } else if (ok) {
+      $notification.post("Rcopy 签到", "签到成功 ✓",
+        (detail ? detail + "\n" : "") + (note ? note + "\n" : "") + "手机号 " + phone);
     } else {
-      $notification.post(ok ? "Rcopy 签到" : "⚠️ Rcopy 签到",
-        ok ? "签到成功 ✓" : "签到失败",
-        msg + "\n手机号 " + phone);
+      $notification.post("⚠️ Rcopy 签到", "签到失败",
+        (detail || text) + "\n手机号 " + phone);
     }
     $done();
   });
