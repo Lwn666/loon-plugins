@@ -11,6 +11,8 @@
  *      cookie 失效 → 用账号密码自动重新登录换票 → 重试一次
  *      首次运行无 cookie → 先登录再签到
  * 凭证只存本机 $persistentStore，不上传。
+ * 网络：$httpClient 的 timeout 单位是毫秒（官方默认 5000），本脚本用 20000ms——
+ *      实测设备到 satomi.cc 单次请求慢时可达 ~17s，官方默认 5000ms 会误判超时。
  * ------------------------------------------------------------------
  */
 
@@ -37,7 +39,7 @@ const ORIGIN = "https://satomi.cc";
 const SIGN_IN = ORIGIN + "/api/sign-in";
 const LOGIN = (arg("LOGIN_API") || ORIGIN + "/login").split(/[,\s]+/)[0];
 const DEBUG = flag("DEBUG");
-const TIMEOUT = 20;                             // 单位：秒
+const TIMEOUT = 20000;                          // 毫秒！$httpClient 的 timeout 单位是 ms（官方默认 5000）
 const TITLE = "THTV 签到";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 
@@ -99,13 +101,22 @@ function pick(str, name) {
   return m ? m[1] : "";
 }
 
-function req(opts, cb) {
+/* 发请求；网络错误（超时/断开）自动重试 1 次——设备到站点的链路抖动大，单次失败不代表没网 */
+function req(opts, cb, left) {
   const o = {
     url: opts.url, timeout: TIMEOUT,
     header: opts.header || {}, headers: opts.header || {},
     body: opts.body
   };
-  (opts.method === "POST" ? $httpClient.post(o, cb) : $httpClient.get(o, cb));
+  const tries = left === undefined ? 1 : left;
+  const back = function (err, resp, raw) {
+    if (err && tries > 0) {
+      log("请求失败（" + err + "），1 秒后重试");
+      return setTimeout(function () { req(opts, cb, tries - 1); }, 1000);
+    }
+    cb(err, resp, raw);
+  };
+  if (opts.method === "POST") $httpClient.post(o, back); else $httpClient.get(o, back);
 }
 function log(s) { console.log("[THTV] " + s); }
 function notify(sub, msg) {
