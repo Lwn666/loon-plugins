@@ -1,0 +1,45 @@
+#!name=THTV 每日签到
+#!desc=探花社区 satomi.cc 每日自动签到。cookie 失效时用账号密码自动重新登录换票，凭证仅存手机端。
+#!author=Lwn666
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/thtv-signin/README.md
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/thtv.png
+#!category=Sign
+#!system=iOS,iPadOS
+#!loon_version=3.5.1(983)
+
+# ============================================================
+# THTV / 探花社区 每日签到
+#
+# 【接口】
+#   登录：POST https://satomi.cc/login
+#         {"email":"邮箱","password":"密码","rememberMe":true}
+#         → Set-Cookie: loginToken=UIDxxx_<32hex> + SESSION=<base64>
+#   签到：POST https://satomi.cc/api/sign-in  （只认 cookie）
+#
+# 【全自动换票】
+#   cookie 有效 → 直接签到
+#   cookie 失效 → 自动用账号密码重新登录换票 → 重试一次
+#   首次运行无 cookie → 先登录再签到
+#   服务端续发的 Set-Cookie 一律跟随并写回本地
+#
+# 【使用方法】
+#   1. 在插件参数「账号」里填写：邮箱#密码
+#      多账号每行一个（或用分号分隔）
+#   2. 装好后可在 Loon 首页手动点「手动签到」立即跑一次
+#
+# 【注意】凭证只存在手机端 $persistentStore，不会上传。
+# ============================================================
+
+[Argument]
+ACCOUNTS=input,"",tag=账号,desc=格式 邮箱#密码 多账号每行一个
+CRONEXP=input,"0 8 * * *",tag=执行时间,desc=默认每天08:00执行 可自行更改
+MANUAL_RUN=switch,true,tag=手动触发立即执行,desc=首页点手动签到时立即执行
+DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
+
+[Script]
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/thtv-signin/thtv-signin.js", {${ACCOUNTS}, ${DEBUG}}) with tag="THTV 自动签到", timeout=120, enable=true, debug=${DEBUG}
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/thtv-signin/thtv-signin.js", {${ACCOUNTS}, ${DEBUG}, ${MANUAL_RUN}}) with tag="THTV 手动签到", img_url="arrow.clockwise", timeout=120, enable=true, debug=${DEBUG}
+
+[Rule]
+DOMAIN-SUFFIX,satomi.cc,DIRECT
+DOMAIN-SUFFIX,upload.satomi.cc,DIRECT
