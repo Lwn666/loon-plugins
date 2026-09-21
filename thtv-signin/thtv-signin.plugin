@@ -39,7 +39,3 @@ DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
 [Script]
 cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/thtv-signin/thtv-signin.js", {${ACCOUNTS}, ${DEBUG}}) with tag="THTV 自动签到", timeout=120, enable=true, debug=${DEBUG}
 generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/thtv-signin/thtv-signin.js", {${ACCOUNTS}, ${DEBUG}, ${MANUAL_RUN}}) with tag="THTV 手动签到", img_url="arrow.clockwise", timeout=120, enable=true, debug=${DEBUG}
-
-[Rule]
-DOMAIN-SUFFIX,satomi.cc,DIRECT
-DOMAIN-SUFFIX,upload.satomi.cc,DIRECT
