@@ -22,6 +22,12 @@
 #   首次运行无 cookie → 先登录再签到
 #   服务端续发的 Set-Cookie 一律跟随并写回本地
 #
+# 【Cloudflare 挑战（2026-09-25 新增）】
+#   站点当前开启了 CF 托管挑战，所有非浏览器请求都会被 403 + 挑战页拦下。
+#   插件已能区分「CF 拦截」和「凭证失效」：被拦时不会误触发换票，
+#   而是通知提示先用浏览器打开一次 satomi.cc（等挑战自动通过约 10-20 秒）。
+#   若站点长期开启挑战，可把浏览器里的 cf_clearance 与配套 UA 填进下面两个参数。
+#
 # 【使用方法】
 #   1. 在插件参数「账号」里填写：邮箱#密码
 #      多账号每行一个（或用分号分隔）
@@ -32,6 +38,8 @@
 
 [Argument]
 ACCOUNTS=input,"",tag=账号,desc=格式 邮箱#密码 多账号每行一个
+CF_CLEARANCE=input,"",tag=cf_clearance,desc=可选 被CF挑战拦截时填写 需与自定义UA配套 留空即不用
+UA_OVERRIDE=input,"",tag=自定义UA,desc=可选 cf_clearance绑定UA 两者必须来自同一个浏览器 留空用插件默认
 CRONEXP=input,"0 8 * * *",tag=执行时间,desc=默认每天08:00执行 可自行更改
 MANUAL_RUN=switch,true,tag=手动触发立即执行,desc=首页点手动签到时立即执行
 DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志

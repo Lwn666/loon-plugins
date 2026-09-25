@@ -10,9 +10,19 @@
  * 逻辑：cookie 有效 → 直接签到
  *      cookie 失效 → 用账号密码自动重新登录换票 → 重试一次
  *      首次运行无 cookie → 先登录再签到
+ *      被 Cloudflare 挑战拦下 → 不换票，如实提示（见下）
  * 凭证只存本机 $persistentStore，不上传。
  * 网络：$httpClient 的 timeout 单位是毫秒（官方默认 5000），本脚本用 20000ms——
  *      实测设备到 satomi.cc 单次请求慢时可达 ~17s，官方默认 5000ms 会误判超时。
+ *
+ * 2026-09-25 修复（站点新上 Cloudflare 托管挑战后暴露的三个问题）：
+ *   1. CF 挑战（403 + "Just a moment..."）被误判成「cookie 失效」→ 去自动换票 →
+ *      登录接口同样被拦 → 报「换票失败：登录失败 HTTP 403 + 挑战页 HTML」，把排查带偏。
+ *      现在先做挑战识别，命中则重试 1 次后如实上报「🚧 CF拦截」，绝不触发换票。
+ *   2. 签到成功的真实响应【没有 success 字段】：
+ *      {"currentExp":3525,"level":{"minExp":3000,"level":9,...}}
+ *      旧版只认 success===true，会把成功当成「⚠️ 提示」。现按字段特征判成功并显示经验/等级。
+ *   3. 已签到的文案是「今天已经签到过了」（含"已经签到"），旧正则恰好能覆盖，一并补"签到过"。
  * ------------------------------------------------------------------
  */
 
@@ -90,6 +100,49 @@ function fixUtf8(s) {                                          // latin1 乱码 
 function text(b) { return fixUtf8(cut(toStr(b))); }
 function json(b) { try { return JSON.parse(text(b)); } catch (e) { return null; } }
 
+/* ---------- Cloudflare 托管挑战识别 ----------
+ * 站点开启 CF 托管挑战后，任何非 JS 请求都会被 403 + "Just a moment..." 挑战页拦下。
+ * 这与「凭证失效」是完全不同的两件事：旧版把它当成 cookie 失效 → 去自动换票 →
+ * 登录接口同样被拦 → 报出「换票失败：登录失败 HTTP 403 + 挑战页 HTML」，误导排查方向。
+ */
+function isChallenge(resp, raw) {
+  const h = (resp && resp.headers) || {};
+  const mit = String(h["cf-mitigated"] || h["CF-Mitigated"] || "");
+  if (/challenge/i.test(mit)) return true;
+  return /Just a moment|challenges\.cloudflare\.com|__cf_chl|Enable JavaScript and cookies to continue/i.test(toStr(raw));
+}
+
+/* ---------- 签到结果解析 ----------
+ * 实测两种成功形态：
+ *   首次签到成功 → {"currentExp":3525,"level":{"minExp":3000,"level":9,...}}  ← 没有 success 字段！
+ *   今日已签     → {"success":false,"message":"今天已经签到过了"}
+ */
+function parseSignResult(d, raw, st) {
+  if (d && typeof d === "object") {
+    if (d.success === true) return { kind: "ok", msg: String(d.message || "签到成功") };
+    if (d.success === false) {
+      const m = String(d.message || "");
+      if (/已到过|已签到|已经签到|签到过|重复签到/.test(m)) return { kind: "signed", msg: m };
+      if (/请先登录|未登录|登录已?过期|重新登录|失效/.test(m)) return { kind: "needlogin", msg: m };
+      return { kind: "fail", msg: m || "服务端返回 success=false" };
+    }
+    const exp = d.currentExp;
+    const lv = d.level && typeof d.level === "object" ? d.level.level : d.level;
+    if (exp !== undefined || lv !== undefined) {
+      return {
+        kind: "ok",
+        msg: "签到成功" + (exp !== undefined ? " · 经验 " + exp : "") + (lv !== undefined ? " · Lv" + lv : "")
+      };
+    }
+    return { kind: "unknown", msg: JSON.stringify(d).slice(0, 150) };
+  }
+  const msg = text(raw) || "";
+  if (/已到过|已签到|已经签到|签到过|重复签到/.test(msg)) return { kind: "signed", msg };
+  if (/请先登录|未登录|登录已?过期|重新登录|失效/.test(msg)) return { kind: "needlogin", msg };
+  if (st !== 200) return { kind: "fail", msg: msg.slice(0, 150) || "HTTP " + st };
+  return { kind: "unknown", msg: msg.slice(0, 150) || "无内容" };
+}
+
 function cookieStr(resp) {
   const h = (resp && resp.headers) || {};
   let raw = h["Set-Cookie"] || h["set-cookie"] || h["setCookie"] || "";
@@ -139,6 +192,8 @@ function doLogin(acct, cb) {
     body: body
   }, function (err, resp, raw) {
     if (err || !resp) return cb("网络错误：" + (err && err.message ? err.message : String(err)));
+    // CF 挑战拦下登录接口 —— 换票这条路同样走不通，如实上报，别让它看起来像"密码错了"
+    if (isChallenge(resp, raw)) return cb("被 Cloudflare 挑战拦截：登录接口返回 403 挑战页，站点当前不允许非浏览器请求登录");
     const sc = cookieStr(resp);
     const d = json(raw);
     const blob = String(raw || "") + "\n" + sc;
@@ -165,21 +220,35 @@ function doLogin(acct, cb) {
 }
 
 /* ---------- 签到 ---------- */
-function doSignIn(acct, ticket, retried, cb) {
+function doSignIn(acct, ticket, retried, cb, cfLeft) {
   const ck = [];
   if (ticket.token) ck.push("loginToken=" + ticket.token);
   if (ticket.session) ck.push("SESSION=" + ticket.session);
+  const cf = arg("CF_CLEARANCE") || ticket.cf || "";
+  if (cf) ck.push("cf_clearance=" + cf);
+  const ua = arg("UA_OVERRIDE") || ticket.ua || UA;
 
   req({
     url: SIGN_IN, method: "POST",
     header: {
       "Origin": ORIGIN, "Referer": ORIGIN + "/",
       "Content-Type": "application/json", "Accept": "application/json, text/plain, */*",
-      "User-Agent": UA, "Cookie": ck.join("; ")
+      "User-Agent": ua, "Cookie": ck.join("; ")
     },
     body: "{}"
   }, function (err, resp, raw) {
     if (err || !resp) return cb("网络错误：" + (err && err.message ? err.message : String(err)));
+
+    // ① CF 托管挑战：实测同条件会概率性 200/403 → 先重试，仍被拦就如实上报，
+    //    绝不当作"cookie 失效"去换票（换票接口同样被拦，只会掩盖真因）
+    if (isChallenge(resp, raw)) {
+      if (cfLeft > 0) {
+        log("被 Cloudflare 挑战拦截，3 秒后重试（剩余 " + cfLeft + " 次）");
+        return setTimeout(function () { doSignIn(acct, ticket, retried, cb, cfLeft - 1); }, 3000);
+      }
+      return cb(null, "拦截", "站点开启了 Cloudflare 托管挑战，脚本请求被 403 拦下（非凭证问题）。\n" +
+        "处理：用浏览器打开一次 satomi.cc，等挑战自动通过（约 10-20 秒）后再试；或稍后重试。");
+    }
 
     const sc = cookieStr(resp);                       // 服务端续发的 cookie 一律跟随
     const nt = pick(sc, "loginToken"), ns = pick(sc, "SESSION");
@@ -190,22 +259,23 @@ function doSignIn(acct, ticket, retried, cb) {
 
     const d = json(raw);
     const st = resp.status || 0;
-    const msg = (d && d.message) || text(raw) || "";
+    const r = parseSignResult(d, raw, st);
 
-    if (d && d.success === true) return cb(null, "成功", msg || "签到成功");
-    if (/已到过|已签到|已经签到|重复签到/.test(msg)) return cb(null, "已签", msg);
+    if (r.kind === "ok") return cb(null, "成功", r.msg);
+    if (r.kind === "signed") return cb(null, "已签", r.msg);
+    if (r.kind === "unknown") return cb(null, "提示", r.msg);
 
-    const needLogin = /请先登录|未登录|登录已?过期|重新登录|失效/.test(msg) || st === 401 || st === 403;
+    const needLogin = r.kind === "needlogin" || st === 401 || st === 403;
     if (needLogin && !retried && acct.pass) {
       log("cookie 失效，自动换票重试");
       return doLogin(acct, function (e, t2) {
         if (e) return cb("换票失败：" + e);
-        doSignIn(acct, t2, true, cb);
+        ticket.token = t2.token; ticket.session = t2.session;
+        doSignIn(acct, ticket, true, cb, cfLeft);
       });
     }
-    if (needLogin) return cb(null, "失效", msg || "请先登录（未配置密码，无法自动换票）");
-    if (st !== 200) return cb(null, "HTTP " + st, msg.slice(0, 150) || "无内容");
-    cb(null, "提示", msg.slice(0, 150) || JSON.stringify(d || {}).slice(0, 150));
+    if (needLogin) return cb(null, "失效", r.msg || "请先登录（未配置密码，无法自动换票）");
+    cb(null, "HTTP " + st, r.msg);
   });
 }
 
@@ -236,9 +306,12 @@ function doSignIn(acct, ticket, retried, cb) {
     const go = function (t) {
       doSignIn(acct, t, false, function (err, sub, msg) {
         const ok = !err && (sub === "成功" || sub === "已签");
-        results.push({ user: acct.user, ok: ok, sub: err ? "❌ 失败" : ({ "成功": "✅ 成功", "已签": "ℹ️ 今日已签", "失效": "🔑 需要登录", "提示": "⚠️ 提示" }[sub] || sub), msg: err || msg });
+        const label = err ? "❌ 失败"
+          : ({ "成功": "✅ 成功", "已签": "ℹ️ 今日已签", "失效": "🔑 需要登录",
+               "拦截": "🚧 CF拦截", "提示": "⚠️ 提示" }[sub] || sub);
+        results.push({ user: acct.user, ok: ok, sub: label, msg: err || msg });
         next();
-      });
+      }, 1);
     };
     if (ticket.token || ticket.session) go(ticket);
     else if (acct.pass) doLogin(acct, function (e, t2) { if (e) { results.push({ user: acct.user, ok: false, sub: "❌ 失败", msg: e }); return next(); } go(t2); });
