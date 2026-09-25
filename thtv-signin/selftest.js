@@ -267,7 +267,7 @@ const cases = [
         url: "https://satomi.cc/api/sign-in",
         method: "POST",
         headers: {
-          "Cookie": "cf_clearance=CFTOKEN123; loginToken=UID1479_40e259eece204f8dad810561281ba536; SESSION=MDJjODVkNzEtYmRiOA",
+          "Cookie": "cf_clearance=CFTOKEN123; loginToken=UID9999_0123456789abcdef0123456789abcdef; SESSION=FAKE_SESSION_VALUE_00",
           "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1"
         }
       }
@@ -275,8 +275,8 @@ const cases = [
     check: (r, ctx) =>
       ctx.store["CF_CLEARANCE"] === "CFTOKEN123" &&
       /iPhone; CPU iPhone OS 18_0/.test(ctx.store["UA_OVERRIDE"] || "") &&
-      ctx.store[BOGUS_LOGINTOKEN_KEY] === "UID1479_40e259eece204f8dad810561281ba536" &&
-      ctx.store[BOGUS_SESSION_KEY] === "MDJjODVkNzEtYmRiOA" &&
+      ctx.store[BOGUS_LOGINTOKEN_KEY] === "UID9999_0123456789abcdef0123456789abcdef" &&
+      ctx.store[BOGUS_SESSION_KEY] === "FAKE_SESSION_VALUE_00" &&
       /CF 挑战令牌已更新/.test((ctx.notes[0] || {}).subtitle || "")
   },
   {
