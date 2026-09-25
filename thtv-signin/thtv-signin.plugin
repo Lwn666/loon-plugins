@@ -16,34 +16,50 @@
 #         → Set-Cookie: loginToken=UIDxxx_<32hex> + SESSION=<base64>
 #   签到：POST https://satomi.cc/api/sign-in  （只认 cookie）
 #
+# 【Cloudflare 挑战（2026-09-25 站点新增）】
+#   站点对所有请求（含 /login 与 /api/*）下发 CF 托管挑战，且是**交互式**的，
+#   需要手动点一下才过 —— 脚本无法自行解算，$httpClient 请求会被 403 挑战页拦下。
+#
+#   所以流程是：
+#     ① 用浏览器打开 satomi.cc，手动点过挑战（约 10-20 秒）
+#     ② 捕获脚本从浏览器请求里截获 cf_clearance + 配套 User-Agent（+ 登录态）存到本地
+#     ③ 签到脚本带上这套令牌，就能正常请求了
+#
+#   ⚠️ cf_clearance 绑定「UA + 出口 IP」：
+#      - 换了 UA 或换了代理节点 → 令牌失效，重新过一次挑战即可
+#      - 建议把 satomi.cc 固定到某个节点，别用 url-test 自动切换
+#      - 若开启捕获后浏览器反而过不了挑战，把「凭证自动捕获」关掉，
+#        改为手动填 cf_clearance / 自定义UA 两个参数
+#
 # 【全自动换票】
 #   cookie 有效 → 直接签到
 #   cookie 失效 → 自动用账号密码重新登录换票 → 重试一次
-#   首次运行无 cookie → 先登录再签到
-#   服务端续发的 Set-Cookie 一律跟随并写回本地
-#
-# 【Cloudflare 挑战（2026-09-25 新增）】
-#   站点当前开启了 CF 托管挑战，所有非浏览器请求都会被 403 + 挑战页拦下。
-#   插件已能区分「CF 拦截」和「凭证失效」：被拦时不会误触发换票，
-#   而是通知提示先用浏览器打开一次 satomi.cc（等挑战自动通过约 10-20 秒）。
-#   若站点长期开启挑战，可把浏览器里的 cf_clearance 与配套 UA 填进下面两个参数。
+#   CF 拦截（403 挑战页）→ 不换票，如实提示（换票同样会被拦）
 #
 # 【使用方法】
-#   1. 在插件参数「账号」里填写：邮箱#密码
-#      多账号每行一个（或用分号分隔）
-#   2. 装好后可在 Loon 首页手动点「手动签到」立即跑一次
+#   1. 在插件参数「账号」里填写：邮箱#密码，多账号每行一个（或用分号分隔）
+#   2. 浏览器打开一次 satomi.cc 过完挑战（收到「CF 挑战令牌已更新」通知即成功）
+#   3. 可在 Loon 首页手动点「THTV 手动签到」立即跑一次
 #
 # 【注意】凭证只存在手机端 $persistentStore，不会上传。
 # ============================================================
 
 [Argument]
 ACCOUNTS=input,"",tag=账号,desc=格式 邮箱#密码 多账号每行一个
-CF_CLEARANCE=input,"",tag=cf_clearance,desc=可选 被CF挑战拦截时填写 需与自定义UA配套 留空即不用
-UA_OVERRIDE=input,"",tag=自定义UA,desc=可选 cf_clearance绑定UA 两者必须来自同一个浏览器 留空用插件默认
+CAPTURE_ENABLE=switch,true,tag=凭证自动捕获,desc=浏览器过CF挑战后自动抓取cf_clearance与登录态
+CF_CLEARANCE=input,"",tag=cf_clearance,desc=可选 关闭自动捕获时手填 需与自定义UA配套
+UA_OVERRIDE=input,"",tag=自定义UA,desc=可选 cf_clearance绑定UA 两者必须来自同一个浏览器
 CRONEXP=input,"0 8 * * *",tag=执行时间,desc=默认每天08:00执行 可自行更改
 MANUAL_RUN=switch,true,tag=手动触发立即执行,desc=首页点手动签到时立即执行
 DEBUG=switch,false,tag=调试模式,desc=开启后输出详细日志
 
 [Script]
+# 凭证/挑战令牌捕获：浏览器访问 satomi.cc 时自动截获 cf_clearance + UA + 登录态
+request if ${url} ~= /^https:\/\/satomi\.cc\//i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/thtv-signin/thtv-capture.js", {${ACCOUNTS}, ${DEBUG}}) with tag="THTV 凭证捕获", timeout=20, enable=${CAPTURE_ENABLE}
+
 cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/thtv-signin/thtv-signin.js", {${ACCOUNTS}, ${DEBUG}}) with tag="THTV 自动签到", timeout=300, enable=true, debug=${DEBUG}
+
 generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/thtv-signin/thtv-signin.js", {${ACCOUNTS}, ${DEBUG}, ${MANUAL_RUN}}) with tag="THTV 手动签到", img_url="arrow.clockwise", timeout=300, enable=true, debug=${DEBUG}
+
+[MITM]
+hostname = satomi.cc

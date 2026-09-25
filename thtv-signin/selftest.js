@@ -14,6 +14,7 @@ const https = require("https");
 const { URL } = require("url");
 
 const SRC = fs.readFileSync(path.join(__dirname, "thtv-signin.js"), "utf8");
+const CAPTURE = fs.readFileSync(path.join(__dirname, "thtv-capture.js"), "utf8");
 
 // 真机上的超时错误原文（Loon 脚本日志里看到的形态）
 const TIMEOUT_ERR =
@@ -106,6 +107,7 @@ function makeEnv(store, argument, reqs, opts) {
       remove: k => { delete store[k]; }
     },
     $argument: argument || {},
+    $request: opts.request || {},
     console: { log: s => logs.push(String(s)) },
     $done: null,
     $httpClient: { get: (o, cb) => send(Object.assign({ method: "GET" }, o), cb), post: (o, cb) => send(Object.assign({ method: "POST" }, o), cb) },
@@ -140,6 +142,7 @@ function runScript(src, store, argument, opts) {
 const MAIL = "test@example.com";
 const BAD_ACCT = MAIL + "#definitely-wrong-password-123";
 const BOGUS_SESSION_KEY = "thtv_session_" + MAIL; // ckKey("session", MAIL)
+const BOGUS_LOGINTOKEN_KEY = "thtv_login_token_" + MAIL; // ckKey("login_token", MAIL)
 
 const cases = [
   {
@@ -205,6 +208,15 @@ const cases = [
     check: (r, ctx) => /邮箱或密码错误/.test(r.body) && ctx.reqs.length === 2 && ctx.reqs[0].synthetic
   },
   {
+    name: "⑧ 一直超时 → 只重试 1 次，如实报错（不无限重试）",
+    src: SRC,
+    args: { ACCOUNTS: BAD_ACCT, DEBUG: true },
+    store: {},
+    opts: { alwaysFail: "/login" },
+    check: (r, ctx) =>
+      r.sub === "❌ 失败" && /Request timeout/i.test(r.body) && ctx.reqs.length === 2 && ctx.reqs[1].synthetic
+  },
+  {
     name: "⑨ CF 托管挑战 → 提示被拦截，且绝不触发换票（回归：旧版报「换票失败 登录失败 HTTP 403」）",
     src: SRC,
     args: { ACCOUNTS: BAD_ACCT, DEBUG: true },     // 故意配了密码：旧版会拿它去换票
@@ -244,6 +256,68 @@ const cases = [
     check: (r, ctx) =>
       (r.sub === "🔑 需要登录" || r.sub === "🚧 CF拦截") &&
       ctx.reqs.filter(q => q.url.indexOf("/api/sign-in") >= 0).length >= 1
+  },
+  {
+    name: "⑬ 捕获脚本：浏览器带 cf_clearance+UA+登录态（单账号）→ 三样都落库",
+    src: CAPTURE,
+    args: { ACCOUNTS: MAIL, DEBUG: true },
+    store: {},
+    opts: {
+      request: {
+        url: "https://satomi.cc/api/sign-in",
+        method: "POST",
+        headers: {
+          "Cookie": "cf_clearance=CFTOKEN123; loginToken=UID1479_40e259eece204f8dad810561281ba536; SESSION=MDJjODVkNzEtYmRiOA",
+          "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1"
+        }
+      }
+    },
+    check: (r, ctx) =>
+      ctx.store["CF_CLEARANCE"] === "CFTOKEN123" &&
+      /iPhone; CPU iPhone OS 18_0/.test(ctx.store["UA_OVERRIDE"] || "") &&
+      ctx.store[BOGUS_LOGINTOKEN_KEY] === "UID1479_40e259eece204f8dad810561281ba536" &&
+      ctx.store[BOGUS_SESSION_KEY] === "MDJjODVkNzEtYmRiOA" &&
+      /CF 挑战令牌已更新/.test((ctx.notes[0] || {}).subtitle || "")
+  },
+  {
+    name: "⑭ 捕获脚本：只有匿名 SESSION（无 loginToken）→ 只存 cf_clearance，绝不回写 SESSION",
+    src: CAPTURE,
+    args: { ACCOUNTS: MAIL, DEBUG: true },
+    store: {},
+    opts: {
+      request: {
+        url: "https://satomi.cc/login",
+        method: "GET",
+        headers: {
+          "Cookie": "cf_clearance=CFTOKEN456; SESSION=ANONYMOUS_SESSION_SHOULD_NOT_BE_SAVED",
+          "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1"
+        }
+      }
+    },
+    check: (r, ctx) =>
+      ctx.store["CF_CLEARANCE"] === "CFTOKEN456" &&
+      ctx.store[BOGUS_SESSION_KEY] === undefined &&
+      ctx.store["thtv_captured_session"] === undefined
+  },
+  {
+    name: "⑮ 捕获脚本：多账号时不回写凭证（避免串号），cf_clearance 照常存",
+    src: CAPTURE,
+    args: { ACCOUNTS: "a@x.com#p1\nb@x.com#p2", DEBUG: true },
+    store: {},
+    opts: {
+      request: {
+        url: "https://satomi.cc/api/sign-in",
+        method: "POST",
+        headers: {
+          "Cookie": "cf_clearance=CFTOKEN789; loginToken=UID1479_deadbeefdeadbeefdeadbeefdeadbeef; SESSION=abc",
+          "User-Agent": "UA-X"
+        }
+      }
+    },
+    check: (r, ctx) =>
+      ctx.store["CF_CLEARANCE"] === "CFTOKEN789" &&
+      Object.keys(ctx.store).filter(k => k.indexOf("thtv_login_token_") === 0).length === 0 &&
+      ctx.logs.some(l => /无法判断归属/.test(l))
   }
 ];
 

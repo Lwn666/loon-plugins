@@ -187,7 +187,7 @@ function doLogin(acct, cb) {
     header: {
       "Origin": ORIGIN, "Referer": ORIGIN + "/login",
       "Content-Type": "application/json", "Accept": "application/json, text/plain, */*",
-      "User-Agent": UA
+      "User-Agent": arg("UA_OVERRIDE") || UA
     },
     body: body
   }, function (err, resp, raw) {
@@ -300,6 +300,12 @@ function doSignIn(acct, ticket, retried, cb, cfLeft) {
     try {
       ticket.token = $persistentStore.read(ckKey("login_token", acct.user)) || "";
       ticket.session = $persistentStore.read(ckKey("session", acct.user)) || "";
+      // 捕获脚本抓到的凭证兜底（仅单账号时可用，避免多账号串号）
+      if (!ticket.token && list.length === 1) {
+        ticket.token = $persistentStore.read("thtv_captured_login_token") || "";
+        ticket.session = $persistentStore.read("thtv_captured_session") || ticket.session;
+        if (ticket.token && DEBUG) log("使用捕获脚本抓到的凭证");
+      }
     } catch (e) {}
     if (DEBUG) log(acct.user + " 已有 cookie: token=" + !!ticket.token + " session=" + !!ticket.session);
 
