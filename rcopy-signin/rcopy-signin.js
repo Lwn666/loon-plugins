@@ -114,7 +114,8 @@ function main() {
   var captureAt = readStore(KEY_CAPTURE);
   if (captureAt) {
     var mins = Math.round((Date.now() - parseInt(captureAt, 10)) / 60000);
-    log("- 凭证捕获于 " + mins + " 分钟前");
+    log("- 凭证捕获于 " + (mins >= 1440 ? (mins / 1440).toFixed(1) + " 天" : mins + " 分钟") + "前" +
+        (mins >= 4320 ? "（token 寿命 7 天，已接近/超过，需在小程序里重新登录刷新）" : ""));
   } else {
     log("- 凭证来源: " + (token ? "插件参数" : "无"));
   }
@@ -139,12 +140,13 @@ function main() {
 
   var exp = tokenExp(token);
   if (exp && exp < Date.now()) {
-    log("- ❌ token 已过期（" + new Date(exp).toLocaleString() + "）");
-    $notification.post("⚠️ Rcopy 签到", "token 已过期", "打开 Rcopy 小程序刷新凭证后重试");
-    $done();
-    return;
+    // 本地 exp 只作提示，【不作为拒绝依据】——
+    // token 的 exp 是服务端签发时写死的（实测 iat + 7 天），本地时钟/服务端宽限期都可能造成误杀，
+    // 所以照发，由服务端裁决。（2026-09-27 修：旧版这里直接 $done() 返回，请求根本没发出去）
+    log("- ⚠️ 本地解读该 token 已于 " + new Date(exp).toLocaleString() + " 过期，仍提交服务端裁决");
+  } else if (exp) {
+    log("- token 有效期至 " + new Date(exp).toLocaleString());
   }
-  if (exp) log("- token 有效期至 " + new Date(exp).toLocaleString());
 
   var body = JSON.stringify({ phone: phone, token: token, system_type: "WeChat:ios" });
   log("- 签到中...");
@@ -209,7 +211,8 @@ function main() {
 
     if (expired) {
       $notification.post("⚠️ Rcopy 签到", "凭证已失效",
-        (detail || text) + "\n打开 Rcopy 小程序任意页面即可自动刷新凭证");
+        (detail || text) + "\n在小程序里【退出登录再重新进入】以刷新凭证" +
+        "（只打开页面可能仍沿用旧 token；token 寿命 7 天）");
     } else if (ok) {
       $notification.post("Rcopy 签到", "签到成功 ✓",
         (detail ? detail + "\n" : "") + (note ? note + "\n" : "") + "手机号 " + phone);

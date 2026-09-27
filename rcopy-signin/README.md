@@ -21,8 +21,8 @@ https://raw.githubusercontent.com/Lwn666/loon-plugins/main/rcopy-signin/rcopy-si
 |---|---|
 | 捕获来源 | 小程序任意请求的 body（`{phone, token, system_type}`）或 `Authorization` / `token` 请求头 |
 | 存储位置 | `$persistentStore` 的 `rcopy_phone` / `rcopy_token` / `rcopy_capture_time` |
-| token 有效期 | JWT `exp` 约 7 天（`iat` + 604800 秒） |
-| 过期处理 | 脚本本地解析 JWT 预判过期；服务端失效时通知「凭证已失效」→ 重新打开小程序刷新 |
+| token 有效期 | JWT `exp` = 签发 + 7 天（**服务端签发时写死**，实测 iat 2026-05-11 → exp 2026-05-18） |
+| 过期处理 | **本地 exp 只作日志提示，不作为拒绝依据** —— 照发请求，由服务端裁决；服务端判失效时通知「在小程序里退出登录再重新进入」（只打开页面可能仍沿用旧 token） |
 
 凭证优先级：**自动捕获 → 插件参数 `phone`/`token`**。参数留空即可，捕获到的值会覆盖。
 手机号拿不到时会从 JWT payload 的 `login_<手机号>_WeChat:ios` 兜底解析。
