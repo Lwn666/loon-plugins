@@ -1,0 +1,37 @@
+#!name=淘图社区 签到+刮刮乐
+#!desc=EmbyPulse 社区（ue2.taotu.ink）每日自动签到，然后按每日上限自动刮刮乐（默认 20 张/次 100 分）。账号密码只存手机端。
+#!author=Lwn666
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/taotu-scratch/README.md
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/taotu.png
+#!category=Sign
+#!system=iOS,iPadOS
+#!loon_version=3.5.1(983)
+
+# ============================================================
+# 淘图 EmbyPulse 社区 · 每日签到 + 刮刮乐
+#
+# 【接口】
+#   登录：POST /api/requests/auth  {"username","password"} → Set-Cookie: session_id（7 天）
+#   校验：GET  /api/requests/check
+#   签到：POST /api/user/points/checkin            → {status, reward, balance}
+#   配置：GET  /api/points/config                  → web_scratch_max_per_day / web_scratch_cost
+#   买卡：POST /api/scratch/buy                    → {win_numbers, grid[], new_points}
+#   刮开：POST /api/scratch/reveal {"cell_index"}  → {number, reward, matched, new_points}
+#
+# 【执行顺序】先签到，再逐张买卡 → 刮开全部格子 → 汇总通知
+#
+# 【凭证】优先复用本地 session_id；失效才用账号密码重新登录。
+#   全部只存 $persistentStore（手机端），不上传任何服务器。
+# ============================================================
+
+[Argument]
+USERNAME=input,"kkpkkp",tag=账号,desc=Emby 社区账号
+PASSWORD=input,"",tag=密码,desc=必填 账号密码 只存本机
+MAXCARDS=number,"20",tag=每日张数上限,desc=默认 20（站点上限也是 20）
+CRONEXP=input,"5 8 * * *",tag=执行时间,desc=默认每天 08:05
+NOTIFY=switch,true,tag=结果通知,desc=关闭后只在日志里记录
+
+[Script]
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${MAXCARDS}, ${NOTIFY}}) with tag="淘图自动签到+刮刮乐", timeout=300, enable=true
+
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${MAXCARDS}, ${NOTIFY}}) with tag="淘图手动跑一次", img_url="arrow.clockwise", timeout=300, enable=true
