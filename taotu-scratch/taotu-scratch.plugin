@@ -30,7 +30,7 @@
 [Argument]
 USERNAME=input,"kkpkkp",tag=账号,desc=Emby 社区账号
 PASSWORD=input,"",tag=密码,desc=必填 账号密码只存本机
-MAXCARDS=input,"20",type=number,tag=每日张数上限,desc=默认20 站点上限也是20
+MAXCARDS=input,20,type=number,tag=每日张数上限,desc=默认20 站点上限也是20
 CRONEXP=input,"5 8 * * *",tag=执行时间,desc=默认每天08:05
 NOTIFY=switch,true,tag=结果通知,desc=关闭后只在日志记录
 
