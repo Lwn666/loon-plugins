@@ -5,6 +5,7 @@
 #!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/taotu.png
 #!category=Sign
 #!system=iOS,iPadOS
+#!loon_version=3.5.1(983)
 
 # ============================================================
 # 淘图 EmbyPulse 社区 · 每日签到 + 刮刮乐
@@ -19,8 +20,8 @@
 #
 # 【执行顺序】先签到，再逐张买卡 → 刮开全部格子 → 汇总通知
 #
-# 【手动运行】Loon 首页 → 脚本 → 「淘图手动跑一次」
-#   generic 脚本不自动执行，只在脚本页手动点。
+# 【手动运行】插件详情页底部「脚本」区 → 「淘图手动跑一次」，或 Loon 首页 → 脚本
+#   generic 脚本不自动执行，只在手动点击时跑。
 #
 # 【凭证】优先复用本地 session_id；失效才用账号密码重新登录。
 #   全部只存 $persistentStore（手机端），不上传任何服务器。
@@ -34,6 +35,6 @@ CRONEXP=input,"5 8 * * *",tag=执行时间,desc=默认每天08:05
 NOTIFY=switch,true,tag=结果通知,desc=关闭后只在日志记录
 
 [Script]
-cron {CRONEXP} script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js, argument={USERNAME,PASSWORD,MAXCARDS,NOTIFY}, tag=淘图自动签到+刮刮乐, timeout=300
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${MAXCARDS}, ${NOTIFY}}) with tag="淘图自动签到+刮刮乐", timeout=300, enable=true
 
-generic script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js, argument={USERNAME,PASSWORD,MAXCARDS,NOTIFY}, tag=淘图手动跑一次, img-url=arrow.clockwise, timeout=300
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${MAXCARDS}, ${NOTIFY}}) with tag="淘图手动跑一次", img_url="arrow.clockwise", timeout=300, enable=true
