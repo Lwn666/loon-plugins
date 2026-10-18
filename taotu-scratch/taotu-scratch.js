@@ -21,11 +21,31 @@ const SKEY = "taotu_session_id";
 function parseArg() {
   let a = typeof $argument !== "undefined" ? $argument : undefined;
   if (typeof a === "string") {
-    try { a = JSON.parse(a); } catch (e) { a = {}; }
+    try { a = JSON.parse(a); } catch (e) {
+      // 旧语法可能传 "USERNAME=x&PASSWORD=y" 形式
+      const o = {};
+      String(a).split(/[&;,]/).forEach(function (kv) {
+        const i = kv.indexOf("=");
+        if (i > 0) {
+          let v = kv.slice(i + 1).trim();
+          try { v = decodeURIComponent(v); } catch (e2) {}
+          o[kv.slice(0, i).trim()] = v;
+        }
+      });
+      a = o;
+    }
   }
   if (Array.isArray(a)) {
     // 旧版数组: 按插件声明顺序 [username, password, max_cards, notify]
-    return { username: a[0], password: a[1], max_cards: a[2], notify: a[3] };
+    // 元素可能是纯值, 也可能是 {USERNAME:"x"} 这种对象
+    const flat = a.map(function (v) {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        const ks = Object.keys(v);
+        return ks.length ? v[ks[0]] : undefined;
+      }
+      return v;
+    });
+    return { username: flat[0], password: flat[1], max_cards: flat[2], notify: flat[3] };
   }
   return a && typeof a === "object" ? a : {};
 }
