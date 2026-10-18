@@ -16,7 +16,6 @@
 const BASE = "https://ue2.taotu.ink";
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 const SKEY = "taotu_session_id";
-const DKEY = "taotu_done_day"; // 记录已完成的日期, 防重复刮
 
 // ---------- 参数解析 ($argument 可能是对象 / JSON 字符串 / 旧数组) ----------
 function parseArg() {
@@ -49,10 +48,6 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function notify(title, body) {
   if (!NOTIFY) { log("通知(已关闭): " + title + " | " + body); return; }
   $notification.post(title, "", body);
-}
-function today() {
-  const d = new Date(Date.now() + 8 * 3600 * 1000); // 东八区
-  return d.toISOString().slice(0, 10);
 }
 
 // ---------- HTTP ----------
@@ -211,7 +206,6 @@ async function ensureLogin() {
   log(body);
   // 无任何收益变化且刮不了(次数用完)时仍通知, 让用户知道脚本跑过; 若想静默可关 notify
   notify("淘图每日任务", body);
-  if (cards > 0) $persistentStore.write(today(), DKEY);
   $done();
 })().catch(function (e) {
   log("异常: " + (e && e.stack ? e.stack : e));
