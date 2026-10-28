@@ -24,6 +24,8 @@ var DATA_HOST = "https://data.xiaoheihe.cn";
 var UA = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.118 Safari/537.36 ApiMaxJia/1.0";
 var REFERER = "http://api.maxjia.com/";
 var DEVICE_INFO = "XiaoMi 13私人定制版";
+// hkey 服务端校验：必须传系统版本字符串（与 API 请求里的 os_version 一致）
+var OS_VERSION = "9";
 var NONCE_SIGN = "tb6e1k7WqQCIHToyzWzI8Ogq9d0EIgpb";  // API 请求 nonce
 var NONCE_REPORT = "fSz04CwxvcWzG737aFNKKxNeGZDFOqJ1"; // data_report nonce
 
@@ -239,7 +241,8 @@ function hkeyFail(kind, detail) {
 async function getHkey(mode, path, timeSec, text, imei, heyboxId) {
   if (mode === "request") {
     var url = HKEY_SERVER + "?mode=request&path=" + encodeURIComponent(path) +
-      "&time=" + timeSec + "&imei=" + imei + "&heybox_id=" + heyboxId;
+      "&time=" + timeSec + "&imei=" + imei + "&heybox_id=" + heyboxId +
+      "&os_version=" + OS_VERSION;
     var resp = await httpGet(url, { "User-Agent": UA, "Accept": "application/json" });
     var data;
     try {
@@ -262,7 +265,8 @@ async function getHkey(mode, path, timeSec, text, imei, heyboxId) {
       text: text,
       time: String(timeSec),
       imei: imei,
-      heybox_id: heyboxId
+      heybox_id: heyboxId,
+      os_version: OS_VERSION
     });
     var resp2 = await httpPost(HKEY_SERVER, { "Content-Type": "application/json" }, body);
     var data2;
@@ -290,7 +294,7 @@ async function signedGet(account, path, extraParams) {
     "&nonce=" + NONCE_SIGN +
     "&hkey=" + hk.hkey +
     "&os_type=Android&x_os_type=Android&x_client_type=mobile" +
-    "&os_version=9&version=" + hk.version + "&build=" + hk.build +
+    "&os_version=" + OS_VERSION + "&version=" + hk.version + "&build=" + hk.build +
     "&_time=" + timeSec +
     "&dw=428&channel=heybox_xiaomi&x_app=heybox" +
     (extraParams ? "&" + extraParams : "");
@@ -317,7 +321,7 @@ async function sendReport(account, textPayload, sessionId) {
     "&nonce=" + NONCE_REPORT +
     "&hkey=" + hk.hkey +
     "&os_type=Android&x_os_type=Android&x_client_type=mobile" +
-    "&os_version=9&version=" + hk.version + "&build=" + hk.build +
+    "&os_version=" + OS_VERSION + "&version=" + hk.version + "&build=" + hk.build +
     "&_time=" + hk.time +
     "&dw=428&channel=heybox_xiaomi&x_app=heybox";
   var body = "data=" + encodeURIComponent(hk.data) + "&key=" + encodeURIComponent(hk.key) + "&sid=" + hk.sid;
