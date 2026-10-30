@@ -1,0 +1,30 @@
+#!name=📺 BiliBili 每日签到
+#!desc=哔哩哔哩每日任务：登录/观看/分享/投币/直播签到/银瓜子转硬币/大会员积分签到
+#!author=MartinsKing（@ClydeTime）｜移植 Lwn666
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/bili-signin/bili-signin.plugin
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/bilibili.png
+#!category=签到
+# 上游：https://github.com/ClydeTime/BiliBili （脚本 V1.5 / 2025-05-16）
+# Boxjs 订阅：https://raw.githubusercontent.com/ClydeTime/BiliBili/main/boxjs/BiliBili.boxjs.json
+
+[Argument]
+扫码Cookie = switch,false,tag=[开关] 扫码Cookie,desc=是否启用此处修改
+APPCookie = switch,true,tag=[开关] APPCookie,desc=是否启用此处修改
+RunTime = input,"30 7 * * *",tag=自定义执行时间,desc=可手动更改脚本运行时间，默认早上7点半
+bigPoint = switch,false,tag=[开关] 观看剧集大积分,desc=是否启用此处修改
+
+[Script]
+# 每日等级任务（默认 07:30）
+cron {RunTime} script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/bili-signin/bili-signin.js, tag=B站每日等级任务, timeout=15
+
+# 大会员观看剧集大积分
+cron "41 7 * * *" script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/bili-signin/bili-signin.js, tag=B站观看剧集大积分, enable={bigPoint}, timeout=15
+
+# 扫码获取 Cookie（响应）
+http-response ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/bili-signin/bili-signin.js, tag=B站Cookie(扫码), timeout=30, enable={扫码Cookie}
+
+# APP 自动更新 Cookie（请求）
+http-request ^https?:\/\/app\.bilibili\.com\/x\/resource\/fingerprint\? script-path=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/bili-signin/bili-signin.js, tag=B站Cookie(APP), enable={APPCookie}
+
+[MITM]
+hostname = app.bilibili.com
