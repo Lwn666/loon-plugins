@@ -1,0 +1,52 @@
+#!name=Readify 阅读签到
+#!desc=Readify 阅读 App 7天挑战每日自动签到。打开App自动捕获token 定时静默签到并推送结果
+#!author=Lwn666
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/readify-signin/README.md
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/readify.png
+#!category=Sign
+#!system=iOS,iPadOS
+#!system_version=15
+#!loon_version=3.5.1(983)
+#!tag=签到,阅读,工具
+#!type=normal
+
+# ============================================================
+# Readify 阅读 App 7 天挑战每日签到
+#
+# 【接口】readifyapp.voiceclub.cn（认证是请求头，不是 Cookie）
+#   查询：GET  /api/campaigns/streaks/status?campaignId=<ID>
+#   签到：POST /api/campaigns/streaks  body {"campaignId":"<ID>"}
+#   认证头：x-token（JWT，约 73h 过期）+ x-user-id + x-device-id
+#
+# 【凭证】打开 Readify App 任意页面（书架/首页/签到页）即自动
+#        截获请求头里的 x-token 等并存入本机，无需手动填写。
+#
+# 【有效期】token 约 3 天过期。收到「凭证已过期」通知后，
+#        重新打开一次 Readify App 即可刷新。
+#
+# 【使用】装好插件后打开一次 App 完成凭证捕获，
+#        之后默认每天 08:00 自动签到，也可在 Loon 首页手动触发。
+#
+# 【活动ID】默认 reading-streak-7d-202607。若官方更换活动，
+#        在插件参数「活动ID」里改成新值即可。
+# ============================================================
+
+[Argument]
+CAMPAIGN_ID=input,"reading-streak-7d-202607",tag=活动ID,desc=7天挑战活动ID 官方更换时修改
+CRONEXP=input,"0 8 * * *",tag=签到时间,desc=默认每天08:00执行 可自行更改
+CAPTURE_ENABLE=switch,true,tag=凭证自动捕获,desc=打开App时自动更新token
+NOTICE=switch,true,tag=捕获时通知,desc=凭证更新时推送提醒
+DEBUG=switch,false,tag=调试模式,desc=输出详细日志
+
+[Script]
+# 凭证捕获：打开 Readify App 任意页面自动截获 x-token / x-user-id / x-device-id
+request if ${url} ~= /^https:\/\/(readifyapp\.voiceclub\.cn|app\.readifyai\.com)\/.+/i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/readify-signin/readify-capture.js", {${DEBUG}, ${NOTICE}}) with tag="Readify凭证捕获", timeout=20, requires_body=true, enable=${CAPTURE_ENABLE}
+
+# 定时签到（cron 表达式来自参数）
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/readify-signin/readify-signin.js", {${CAMPAIGN_ID}, ${DEBUG}}) with tag="Readify自动签到", timeout=60, enable=true, debug=${DEBUG}
+
+# 手动触发（Loon 首页点一下即跑）
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/readify-signin/readify-signin.js", {${CAMPAIGN_ID}, ${DEBUG}}) with tag="Readify立即签到", img_url="checkmark.seal", timeout=60, enable=true, debug=${DEBUG}
+
+[MITM]
+hostname = readifyapp.voiceclub.cn, app.readifyai.com
