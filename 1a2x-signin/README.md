@@ -46,7 +46,8 @@ https://raw.githubusercontent.com/Lwn666/loon-plugins/main/1a2x-signin/1a2x-sign
 |---|---|---|
 | 无凭证 | node 仿真 Loon 运行时 | ✅ 提示「缺少登录凭证」 |
 | 伪造 `__Host-nc.sid` | 真实请求 1a2x.com | ✅ `GET /growth` 返回 302 → `/login`，正确判定「凭证已失效」 |
-| 真实凭证全流程 | 待填 | — |
+| 真实凭证 · 已签分支 | Loon 真机（2026-11-03 22:2x） | ✅ `GET /growth` 200，识别登录态，解析「香蕉 16」，判定今日已签、不重复提交 |
+| 真实凭证 · 签到分支 | 待次日 08:00 cron | 今日已签，无法当日复测 |
 
 `selftest.js` 可在 node 里仿真 Loon 运行时：
 

@@ -147,8 +147,16 @@ function metric(html, name) {
 
 function streaks(html) {
   if (!html) return null;
-  var m = /连续签到[^\d]{0,20}(\d+)\s*天/.exec(html);
-  return m ? parseInt(m[1], 10) : null;
+  var pats = [
+    /连续[^\d<>]{0,12}(\d+)\s*天/,          // 已连续签到 3 天 / 连续签到3天
+    /(\d+)\s*天\s*连续/,                    // 3 天连续
+    /streak[">\s:]*?(\d{1,3})/i
+  ];
+  for (var i = 0; i < pats.length; i++) {
+    var m = pats[i].exec(html);
+    if (m) { var n = parseInt(m[1], 10); if (n >= 0 && n < 10000) return n; }
+  }
+  return null;
 }
 
 function snippet(s) {
