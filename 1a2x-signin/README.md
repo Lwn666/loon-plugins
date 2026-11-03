@@ -73,6 +73,29 @@ https://raw.githubusercontent.com/Lwn666/loon-plugins/main/1a2x-signin/1a2x-sign
 | `1a2x-signin.js` | cron/generic：查状态 → 取 CSRF → 提交 → 回读确认 |
 | `selftest.js` | node 仿真桩，真实 HTTPS |
 
+## 为什么不支持账号密码登录（2026-11-03 实测，勿重复研究）
+
+登录 `POST /login` **服务端强制校验 Cloudflare Turnstile**，不是前端摆设：
+
+| 提交 | 响应 |
+|---|---|
+| 仅 `_csrf` + `identity` + `password` | `400 请先完成人机验证 / Complete the verification first` |
+| 加伪造的 `cf-turnstile-response` | `400 验证失败或已过期 / Verification failed or expired` |
+
+表单里是 `<div data-turnstile data-sitekey="0x4AAAAAAFvnBttJauLFMrPy" data-action="login" data-binding="…">`，
+token 是 Cloudflare 签名的 JWT（绑 sitekey/action/hostname/时效，一次性），脚本无法伪造，
+也必须由真浏览器执行 `challenges.cloudflare.com` 的 JS 才能拿到。
+
+替代路径也堵死：
+
+- `/api/login`、`/api/auth/login`、`/api/session` 等看似存在（无 CSRF 时返回 403 表单令牌错误），
+  带上合法 CSRF 后一律 **404** —— 是全局 CSRF 中间件先于路由匹配，并没有隐藏 API
+- Loon 脚本无 JS 执行环境；本机与内置浏览器均加载不到 `challenges.cloudflare.com`
+  （`iframe` 数量 0、token 长度 0）
+- GitHub / DNSHE 第三方登录按钮同样挂了 `data-action="provider"` 的 Turnstile
+
+结论：**只能靠用户在浏览器登录一次，由插件从请求头捕获 Cookie**。
+
 ## 已知限制
 
 - 依赖站点表单结构（`daily-checkin` / `_csrf`），改版后需同步
