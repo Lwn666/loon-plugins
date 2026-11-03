@@ -145,18 +145,11 @@ function metric(html, name) {
   return m ? parseInt(m[1].replace(/,/g, ""), 10) : null;
 }
 
-function streaks(html) {
-  if (!html) return null;
-  var pats = [
-    /连续[^\d<>]{0,12}(\d+)\s*天/,          // 已连续签到 3 天 / 连续签到3天
-    /(\d+)\s*天\s*连续/,                    // 3 天连续
-    /streak[">\s:]*?(\d{1,3})/i
-  ];
-  for (var i = 0; i < pats.length; i++) {
-    var m = pats[i].exec(html);
-    if (m) { var n = parseInt(m[1], 10); if (n >= 0 && n < 10000) return n; }
-  }
-  return null;
+/* 服务端 flash 提示，如「今日签到：+5 香蕉」 */
+function flash(html) {
+  if (!html) return "";
+  var m = /class="flash"[^>]*>[\s\S]{0,300}?<span>([^<]+)<\/span>/.exec(html);
+  return m ? m[1].replace(/\s+/g, " ").trim() : "";
 }
 
 function snippet(s) {
@@ -195,11 +188,10 @@ function snippet(s) {
     }
 
     var before = metric(html, "bananas");
-    var st = streaks(html);
-    log("- 香蕉: " + (before === null ? "-" : before) + " / 连续签到: " + (st === null ? "-" : st + " 天"));
+    log("- 香蕉: " + (before === null ? "-" : before) + " / 今日状态: " + (alreadyDone(html) ? "已签到" : "未签到"));
 
     if (alreadyDone(html)) {
-      return notify("✅ 今日已签到", "香蕉 " + (before === null ? "-" : before) + (st !== null ? " · 连续 " + st + " 天" : "") + "\n无需重复操作");
+      return notify("✅ 今日已签到", "香蕉 " + (before === null ? "-" : before) + "\n无需重复操作");
     }
 
     var csrf = extractCsrf(html);
@@ -230,7 +222,7 @@ function snippet(s) {
         var after = toStr(raw3);
         var doneOk = alreadyDone(after);
         var banana2 = metric(after, "bananas");
-        var st3 = streaks(after);
+        var tip = flash(after) || flash(body2);
 
         if (!doneOk) {
           if (body2.indexOf("今日已签到") !== -1) doneOk = true;
@@ -239,7 +231,7 @@ function snippet(s) {
 
         var gain = (before !== null && banana2 !== null) ? (banana2 - before) : null;
         var line = "香蕉 " + (banana2 === null ? "-" : banana2) + (gain !== null && gain > 0 ? "（+" + gain + "）" : "");
-        if (st3 !== null) line += " · 连续 " + st3 + " 天";
+        if (tip) line += "\n" + tip;
         return notify("✅ 签到成功", line);
       });
     });

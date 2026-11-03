@@ -45,16 +45,24 @@ https://raw.githubusercontent.com/Lwn666/loon-plugins/main/1a2x-signin/1a2x-sign
 | 场景 | 方式 | 结果 |
 |---|---|---|
 | 无凭证 | node 仿真 Loon 运行时 | ✅ 提示「缺少登录凭证」 |
-| 伪造 `__Host-nc.sid` | 真实请求 1a2x.com | ✅ `GET /growth` 返回 302 → `/login`，正确判定「凭证已失效」 |
-| 真实凭证 · 已签分支 | Loon 真机（2026-11-03 22:2x） | ✅ `GET /growth` 200，识别登录态，解析「香蕉 16」，判定今日已签、不重复提交 |
-| 真实凭证 · 签到分支 | 待次日 08:00 cron | 今日已签，无法当日复测 |
+| 伪造 `__Host-nc.sid` | 真实请求 1a2x.com | ✅ `GET /growth` → 302 `/login`，判「凭证已失效」 |
+| 真实凭证 · 已签分支 | Loon 真机 + iSH 直连（2026-11-03） | ✅ `GET /growth` 200 / 识别登录态 / 香蕉 16 / 判定已签不重复提交 |
+| 真实凭证 · 表单提交 | iSH 直连 POST `/growth/checkin` | ✅ 200，无 `Invalid form token`，服务端返回 flash「今日签到：+5 香蕉」；香蕉仍 16（未重复发放，验证脚本的「回读确认」必要） |
+| 真实凭证 · 发放分支 | 待次日 08:00 cron | 当日已签，无法复测；脚本以「回读成长页出现 disabled」为成功判据 |
 
-`selftest.js` 可在 node 里仿真 Loon 运行时：
+页面结构实测（2026-11-03，`/growth` 200 / 32,663 字节）：
 
-```bash
-A2X_COOKIE='__Host-nc.sid=s%3A...' node selftest.js    # 真实凭证跑全流程
-node selftest.js                                       # 无凭证，验证提示分支
+```html
+<form class="daily-checkin" method="post" action="/growth/checkin">
+  <input type="hidden" name="_csrf" value="68258c64…">
+  <input type="hidden" name="return_to" value="/growth">
+  <button class="button full" disabled>…今日已签到 +5</button>
+</form>
+<div data-member-metric="bananas"><dd>16</dd></div>
 ```
+
+要点：`/growth` **没有**「连续签到 N 天」字段（侧栏的「累计签到 30 天/365 天」是签到达人榜），
+所以不解析连续天数，避免误抓；成功文案以服务端 flash `class="flash"` 为准。
 
 ## 文件
 
