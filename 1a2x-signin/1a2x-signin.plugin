@@ -1,0 +1,50 @@
+#!name=1A2X 社区签到
+#!desc=1A2X 社区每日自动签到领香蕉。浏览一次站点自动捕获登录态 定时静默签到并推送结果
+#!author=Lwn666
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/1a2x-signin/README.md
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/1a2x.png
+#!category=Sign
+#!system=iOS,iPadOS
+#!system_version=15
+#!loon_version=3.5.1(983)
+#!tag=签到,社区,工具
+#!type=normal
+
+# ============================================================
+# 1A2X 社区（https://1a2x.com）每日签到
+#
+# 【接口】表单提交（服务端渲染，不是 JSON API）
+#   查询：GET  /growth            → 页面内含 daily-checkin 表单 + _csrf
+#   签到：POST /growth/checkin    body _csrf=<token>&return_to=/growth
+#   已签特征：按钮 disabled / 文案「今日已签到」
+#
+# 【凭证】登录态是 Cookie（__Host-nc.sid，HttpOnly，脚本读不到页面）。
+#        用 http-request 从请求头截获完整 Cookie，存本机。
+#        打开一次已登录的 1a2x.com 页面即自动捕获。
+#
+# 【有效期】session cookie，约 7 天。收到「凭证已失效」通知后，
+#        重新登录一次 1a2x.com 并浏览任意页面即可刷新。
+#
+# 【使用】装好插件 → 用 Safari 打开一次 1a2x.com（已登录状态）
+#        → 凭证自动捕获 → 之后默认每天 08:00 自动签到，
+#        也可在 Loon 首页脚本页手动触发「1A2X立即签到」。
+# ============================================================
+
+[Argument]
+CRONEXP=input,"0 8 * * *",tag=签到时间,desc=默认每天08:00执行 可自行更改
+CAPTURE_ENABLE=switch,true,tag=凭证自动捕获,desc=浏览站点时自动更新登录态
+NOTICE=switch,true,tag=捕获时通知,desc=仅凭证变化时推送
+DEBUG=switch,false,tag=调试模式,desc=输出详细日志
+
+[Script]
+# 凭证捕获：访问 1a2x.com 任意页面时截获 Cookie 请求头
+request if ${url} ~= /^https:\/\/1a2x\.com\//i then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/1a2x-signin/1a2x-capture.js", {${NOTICE}, ${DEBUG}}) with tag="1A2X凭证捕获", timeout=20, enable=${CAPTURE_ENABLE}
+
+# 定时签到（cron 表达式来自参数）
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/1a2x-signin/1a2x-signin.js", {${DEBUG}}) with tag="1A2X自动签到", timeout=60, enable=true, debug=${DEBUG}
+
+# 手动触发（Loon 首页脚本页点一下即跑）
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/1a2x-signin/1a2x-signin.js", {${DEBUG}}) with tag="1A2X立即签到", img_url="checkmark.seal", timeout=60, enable=true, debug=${DEBUG}
+
+[MITM]
+hostname = 1a2x.com
