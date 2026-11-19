@@ -1,0 +1,16 @@
+#!name=⚡ Altare 每日签到
+#!desc=自动领取 Altare 团队每日奖励并推送结果｜需填入会话令牌
+#!author=Lwn666
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/altare-signin/altare-signin.plugin
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/altare.png
+#!category=签到
+#!system=iOS,iPadOS
+#!loon_version=3.5.1(983)
+
+[Argument]
+RunTime = input,"5 8 * * *",tag=执行时间,desc=默认每天08:05执行 可自行更改
+Team = input,01a47a1e-cb7a-44d8-87e5-a06be4f315be,tag=团队ID,desc=已填当前团队 一般无需修改
+Token = input,在这里粘贴altr-token,tag=会话令牌,desc=在 iSH 里执行 altr token 取得 切勿外传
+
+[Script]
+cron ${RunTime} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/altare-signin/altare-signin.js", {${Team}, ${Token}}) with tag="Altare 每日签到", timeout=30, enable=true
