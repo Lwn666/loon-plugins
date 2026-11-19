@@ -11,14 +11,18 @@ var TEAM = ($argument && $argument.Team) ? String($argument.Team).trim() : "";
 var TOKEN = ($argument && $argument.Token) ? String($argument.Token).trim() : "";
 
 function push(title, subtitle, body) {
+  console.log("[altare] 通知: " + title + " | " + subtitle + " | " + body);
   $notification.post(title, subtitle, body);
 }
+
+function log(msg) { console.log("[altare] " + msg); }
 
 function bolts(cents) {
   return (Number(cents || 0) / 100).toFixed(2);
 }
 
 if (!TEAM || !TOKEN || TOKEN.indexOf("在这里") === 0 || TOKEN.length < 20) {
+  log("参数不完整 team=" + (TEAM ? "ok" : "空") + " token=" + (TOKEN && TOKEN.length >= 20 ? "ok" : "未填或过短(" + TOKEN.length + ")"));
   push("Altare 签到未配置", "缺少 Token", "插件参数里 Token 还占位符，请在 iSH 执行 altr token 后粘贴");
   $done({});
 } else {
@@ -39,9 +43,10 @@ if (!TEAM || !TOKEN || TOKEN.indexOf("在这里") === 0 || TOKEN.length < 20) {
     var daily = st.daily || {};
 
     if (!daily.canClaim) {
-      // 今天已领过，保持静默
+      log("今天已领过（last=" + (daily.lastClaimISO || "-") + " 连签=" + (daily.currentStreak || 0) + "），静默退出");
       return $done({});
     }
+    log("可以领取：基础 " + bolts(daily.baseRewardCents) + " bolts，连签加成 " + bolts(daily.streakBonusCents) + "，本次合计 " + bolts(daily.totalRewardCents));
 
     $httpClient.post({
       url: BASE + "/tenants/" + TEAM + "/rewards/claim",
@@ -58,6 +63,7 @@ if (!TEAM || !TOKEN || TOKEN.indexOf("在这里") === 0 || TOKEN.length < 20) {
       }
       var j = {};
       try { j = JSON.parse(d2); } catch (e3) { j = {}; }
+      log("领取成功 balance=" + bolts(j.balanceCents) + " streak=" + (j.newStreak || "-"));
       var got = bolts(j.totalRewardCents);
       var bonus = Number(j.streakBonusCents || 0) > 0 ? ("（连签加成 +" + bolts(j.streakBonusCents) + "）") : "";
       push(
