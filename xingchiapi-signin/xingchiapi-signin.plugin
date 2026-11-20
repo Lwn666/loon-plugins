@@ -1,5 +1,5 @@
 #!name=🌟 星驰API 公益站签到
-#!desc=自动领取星驰API公益站每日签到额度并推送结果｜自动抓取站点令牌 无需手动维护
+#!desc=自动领取星驰API公益站每日签到额度并推送结果｜令牌自动抓取 或填一个独立会话 rt 长期免维护
 #!author=Lwn666
 #!homepage=https://github.com/Lwn666/loon-plugins/blob/main/xingchiapi-signin/xingchiapi-signin.plugin
 #!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/xingchiapi.png
@@ -10,7 +10,7 @@
 [Argument]
 RunTime = input,"5 8 * * *",tag=执行时间,desc=默认每天 08:05 签到 可自行更改
 AccessToken = input,,tag=访问令牌·可选,desc=留空即可：打开一次站点自动抓取（24h 有效）。手动填 eyJ... 开头
-RefreshToken = input,,tag=刷新令牌·可选,desc=填 rt_... 开头可长期自动续期；注意会与浏览器轮流换发令牌
+RefreshToken = input,,tag=独立会话rt·可选,desc=填 rt_... 开头=独立会话模式，每天自动续期约 30 天，不与浏览器抢令牌；留空=抓包模式
 
 [Script]
 # 每日签到

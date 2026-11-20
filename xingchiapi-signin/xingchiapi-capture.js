@@ -1,12 +1,14 @@
 /*
  * 星驰API 令牌捕获（Loon http-response）
- * 用户在浏览器/App 登录或刷新站点时，把 access_token / refresh_token 存入 persistentStore，
- * 供 xingchiapi-signin.js 使用。这样签到脚本不需要自己去换发令牌，
- * 不会和浏览器抢 refresh token（站点的 rt 是一次性轮换的）。
+ * 用户在浏览器/App 登录或刷新站点时，把 access_token / refresh_token 存进 persistentStore。
+ *
+ * 注意：这里抓到的 refresh_token 属于「浏览器会话」，是一次性轮换的。
+ * 签到脚本只在「参数里没填 RefreshToken」的 capture 模式下才会用它；
+ * 填了参数（manual 模式）时脚本只用自己续期出来的 rt，不会动浏览器这份。
  */
 
 var K_AT = "xingchiapi_at";
-var K_RT = "xingchiapi_rt";
+var K_RT_CAPTURE = "xingchiapi_rt_capture";
 
 function save(key, val) {
   if (!val || typeof val !== "string") { return; }
@@ -20,7 +22,7 @@ try {
     var d = (j && j.data) ? j.data : j;
     if (d && d.access_token) {
       save(K_AT, d.access_token);
-      if (d.refresh_token) { save(K_RT, d.refresh_token); }
+      if (d.refresh_token) { save(K_RT_CAPTURE, d.refresh_token); }
       console.log("[xingchi] 已捕获令牌 at_len=" + String(d.access_token).length + " rt=" + (d.refresh_token ? "yes" : "no"));
     }
   }

@@ -10,34 +10,55 @@ https://raw.githubusercontent.com/Lwn666/loon-plugins/main/xingchiapi-signin/xin
 
 Loon → 配置 → 插件 → 添加插件，粘贴上面的地址。
 
-## 参数
+## 令牌有效期
 
-| 参数 | 默认 | 说明 |
+| 凭证 | 有效期 | 说明 |
 |---|---|---|
-| 执行时间 | `5 8 * * *` | 每天 08:05，可改 |
-| 访问令牌（可选） | 空 | **留空即可**。插件会在你登录/刷新站点时自动抓取 |
-| 刷新令牌（可选） | 空 | `rt_...` 开头；填了可在访问令牌过期后自动续期 |
+| `access_token`（Bearer JWT） | **24 小时** | 接口返回 `expires_in: 86400`，实测 |
+| `refresh_token`（`rt_...`） | **约 30 天** | 后端默认 `refresh_token_expire_days: 30`；站点未公开该配置，属于默认值推断 |
+| 密码登录 | — | **走不通**，见下 |
 
-只需添加插件、什么都不填就能用——前提是手机开着 Loon 且 **24 小时内打开过一次站点**（Loon 里需要允许 MITM 与证书）。
+`refresh_token` 是**一次性轮换**的：换一次 at 就作废旧的，同时下发新的。所以任何两份程序共用一个 rt，必然有一方被踢。
+
+## 为什么不能改成账号密码登录
+
+站点登录接口 `POST /api/v1/auth/login` 强制 Cloudflare Turnstile（站点 `turnstile_enabled: true`）。实测：
+
+```
+# 不带验证码
+{"code":400,"message":"turnstile verification failed","reason":"TURNSTILE_VERIFICATION_FAILED"}
+# 带伪造 turnstile_token，结果一样
+{"code":400,"message":"turnstile verification failed","reason":"TURNSTILE_VERIFICATION_FAILED"}
+```
+
+而且后端顺序是先校验验证码、再校验密码（`auth_handler.go: Login()` 里 `VerifyCaptcha` 在 `authService.Login` 之前），所以纯 HTTP 客户端连"密码对不对"都问不到。Turnstile 需要真人浏览器环境下的挑战令牌，脚本无法生成。
+
+顺带：用户面板接口全部走 JWT 中间件（`routes/user.go`），站点的 `sk-...` API Key 不能用来调签到。
+
+## 两种模式
+
+### A. 抓包模式（参数全留空，默认）
+
+插件带一条 `http-response` 脚本，匹配 `auth/login` 与 `auth/refresh`，把浏览器会话的令牌存进 persistentStore，签到脚本直接用。
+
+- 优点：零配置，不用管令牌
+- 代价：**24 小时内要开过一次站点**，否则 access_token 过期、且没有 rt 可续（或续了会和浏览器抢）
+
+### B. 独立会话模式（`RefreshToken` 填 rt）
+
+把一个**独立会话**的 `rt_...` 填进参数。脚本每天用自己的 rt 续期、轮换后写回 `xingchiapi_rt_plugin`，完全不读抓包那份，浏览器会话不受影响。
+
+- 优点：填一次约 30 天免维护，不用每天开站点
+- 拿 rt 的方法：在**不常用的浏览器 / 隐私窗口 / Minis 内置浏览器**里登录一次站点，从响应里取 `refresh_token`（一次性轮换，取的这份就别再用那个窗口了，否则会互相顶掉）
+
+两种模式的 store 键分开存：`xingchiapi_rt_capture`（抓包）与 `xingchiapi_rt_plugin`（独立会话），互不覆盖。
 
 ## 行为
 
-- `GET /api/v1/user/checkin` 读状态：`claimed_today=true` 直接静默退出，不重复推送
+- `GET /api/v1/user/checkin` 读状态，`claimed_today=true` 直接静默退出
 - 未签到才 `POST /api/v1/user/checkin` 领取
 - 成功推送「今日 +300 / 累计 N 天 / 余额」；失败推送 HTTP 码与响应片段
-- 401 时：有刷新令牌先续期再重试，没有则推送提醒重新登录
-
-## 令牌怎么来（自动）
-
-插件带一条 `http-response` 脚本，匹配 `api.xingchiapi.com/api/v1/auth/login` 与 `.../auth/refresh`，把响应里的 `access_token` / `refresh_token` 存进 Loon 的 persistentStore。签到脚本优先用这份令牌，所以不会和浏览器抢刷新令牌。
-
-需要满足：Loon 已装证书 + 配置里对 `api.xingchiapi.com` 开启 MITM（插件里的 `[MITM]` 段会自动追加）。
-
-## 关于刷新令牌的注意
-
-站点的 refresh token 是**一次性轮换**的（用一次旧的就作废，`POST /api/v1/auth/refresh` 会返回新的 `rt_...`）。脚本续期后会把新令牌写回 store，但浏览器手里那份同时失效，需要重新登录一次。
-
-所以：**除非确实长时间不开站点，不建议填刷新令牌**，靠自动抓取更省心。
+- 401 时先续期再重试；续不了才推送提醒
 
 ## 接口（实测 2026-11-20）
 
@@ -54,4 +75,4 @@ POST /api/v1/auth/refresh  {"refresh_token":"rt_..."}
   -> {"code":0,"data":{"access_token":"eyJ...","refresh_token":"rt_...","token_type":"Bearer","expires_in":86400}}
 ```
 
-鉴权：`Authorization: Bearer <access_token>`，JWT 有效期 24 小时。站点基于 [sub2api](https://github.com/Wei-Shaw/sub2api)（版本 0.2.21）。
+鉴权：`Authorization: Bearer <access_token>`。站点基于 [sub2api](https://github.com/Wei-Shaw/sub2api) v0.2.21。
