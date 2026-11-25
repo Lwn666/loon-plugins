@@ -1,5 +1,5 @@
-#!name=淘图社区 签到+刮刮乐
-#!desc=EmbyPulse 社区（ue2.taotu.ink）每日自动签到，然后按每日上限自动刮刮乐（默认 20 张/次 100 分）。账号密码只存手机端。
+#!name=乐蛙影视 签到+会员续期
+#!desc=FlixPilot 面板（ue2.taotu.ink）每日自动签到领爆米花；会员到期前 30 天自动用爆米花兑换月卡续期。账号密码只存手机端。
 #!author=Lwn666
 #!homepage=https://github.com/Lwn666/loon-plugins/blob/main/taotu-scratch/README.md
 #!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/taotu.png
@@ -8,33 +8,35 @@
 #!loon_version=3.5.1(983)
 
 # ============================================================
-# 淘图 EmbyPulse 社区 · 每日签到 + 刮刮乐
+# 乐蛙影视（FlixPilot）· 每日签到 + 会员到期自动续期
+# 站点: https://ue2.taotu.ink   （2026-11 面板整站改版后的新接口）
 #
 # 【接口】
-#   登录：POST /api/requests/auth  {"username","password"} → Set-Cookie: session_id（7 天）
-#   校验：GET  /api/requests/check
-#   签到：POST /api/user/points/checkin            → {status, reward, balance}
-#   配置：GET  /api/points/config                  → web_scratch_max_per_day / web_scratch_cost
-#   买卡：POST /api/scratch/buy                    → {win_numbers, grid[], new_points}
-#   刮开：POST /api/scratch/reveal {"cell_index"}  → {number, reward, matched, new_points}
+#   登录   POST /api/auth/login {username,password} → Set-Cookie: auth-token
+#   会话   GET  /api/auth/me      → {authenticated,user{popcorn,membershipExpiry,lastSignIn}}
+#   规则   GET  /api/auth/sign-in → {enabled,base{popcorn}}
+#   签到   POST /api/auth/sign-in → {success,message,popcorn,streak}
+#   商城   GET  /api/shop         → {items[],wallet{popcorn}}
+#   购买   POST /api/shop {itemId}→ {wallet,rewardMessage}
 #
-# 【执行顺序】先签到，再逐张买卡 → 刮开全部格子 → 汇总通知
+# 【凭证】优先复用本地 auth-token；接口返回未认证时自动用账号密码重新登录，
+#   登录成功后的新 token 会覆盖写入。全部只存 $persistentStore（手机端）。
 #
-# 【手动运行】插件详情页底部「脚本」区 → 「淘图手动跑一次」，或 Loon 首页 → 脚本
-#   generic 脚本不自动执行，只在手动点击时跑。
+# 【续期】会员剩余天数 ≤ 续期阈值（默认 30 天）时，自动用爆米花买「月卡」
+#   （3000 爆米花 / 30 天）；爆米花不足则只发通知，不扣款。
 #
-# 【凭证】优先复用本地 session_id；失效才用账号密码重新登录。
-#   全部只存 $persistentStore（手机端），不上传任何服务器。
+# 【手动运行】插件详情页底部「脚本」区 → 「乐蛙影视手动跑一次」
 # ============================================================
 
 [Argument]
-USERNAME=input,"kkpkkp",tag=账号,desc=Emby 社区账号
+USERNAME=input,"kkpkkp",tag=账号,desc=乐蛙影视登录账号
 PASSWORD=input,"",tag=密码,desc=必填 账号密码只存本机
-MAXCARDS=input,20,type=number,tag=每日张数上限,desc=默认20 站点上限也是20
-CRONEXP=input,"5 8 * * *",tag=执行时间,desc=默认每天08:05
+RENEW=switch,true,tag=自动续期,desc=会员剩余天数不足时自动用爆米花买月卡
+RENEW_DAYS=input,30,type=number,tag=续期阈值,desc=剩余天数≤该值时触发 默认30
 NOTIFY=switch,true,tag=结果通知,desc=关闭后只在日志记录
+CRONEXP=input,"5 8 * * *",tag=执行时间,desc=默认每天08:05
 
 [Script]
-cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${MAXCARDS}, ${NOTIFY}}) with tag="淘图自动签到+刮刮乐", timeout=300, enable=true
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${RENEW}, ${RENEW_DAYS}, ${NOTIFY}}) with tag="乐蛙影视自动签到", timeout=120, enable=true
 
-generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${MAXCARDS}, ${NOTIFY}}) with tag="淘图手动跑一次", img_url="arrow.clockwise", timeout=300, enable=true
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/taotu-scratch/taotu-scratch.js", {${USERNAME}, ${PASSWORD}, ${RENEW}, ${RENEW_DAYS}, ${NOTIFY}}) with tag="乐蛙影视手动跑一次", img_url="arrow.clockwise", timeout=120, enable=true
