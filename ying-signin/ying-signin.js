@@ -1,13 +1,43 @@
 /* ying-signin: Loon only. No credential capture; no external dependencies. */
 (async function () {
   "use strict";
-  const BASE = "https://ying.wedg.top", DAY = 86400000;
+  const BASE = "https://ying.wedg.top", DAY = 86400000, VERSION = "2026.11.26.2";
   const started = Date.now(), today = Math.floor((started + 8 * 3600000) / DAY);
   const result = { sign: "未执行", coins: "未知", expiry: "未知", renew: "未执行" };
   let store, token, cookie = "", recovered = false;
   function fail(code) { const e = new Error(code); e.safeCode = code; throw e; }
   function reason(e) { return e && e.safeCode || "内部异常"; }
   function int(n, min) { return Number.isSafeInteger(n) && n >= min; }
+  function networkInfo(err) {
+    // Never print native descriptions: they may contain request data or credentials.
+    const fields = [];
+    try {
+      if (typeof err === "string") fields.push(err);
+      else if (err && typeof err === "object") ["domain", "code", "message", "localizedDescription", "description"].forEach(function (key) {
+        const value = err[key];
+        if (typeof value === "string" || typeof value === "number") fields.push(key + "=" + value);
+      });
+    } catch (_) { return "底层错误字段不可读"; }
+    const text = fields.join(" "), domain = text.match(/\b(?:NSURLErrorDomain|NSPOSIXErrorDomain|kCFErrorDomainCFNetwork|NSOSStatusErrorDomain|Loon\.HTTPError)\b/);
+    const code = text.match(/\b(?:code|errno|error)\s*[=: ]\s*(-?\d{1,5})\b/i);
+    const number = code ? Number(code[1]) : null;
+    const symbol = text.match(/\b(?:ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ENOTFOUND|EAI_AGAIN)\b/);
+    let kind = "";
+    if (number === -1001 || /timed?\s*out|timeout|超时/i.test(text)) kind = "超时";
+    else if (number !== null && number <= -1200 && number >= -1206) kind = "TLS/证书失败";
+    else if (number === -1003 || number === -1006) kind = "DNS/域名解析失败";
+    else if (number === -1004) kind = "连接建立失败";
+    else if (number === -1005) kind = "连接中断";
+    else if (number === -1009) kind = "网络不可用";
+    else if (number === -999) kind = "请求取消";
+    else if (/certificate|\bTLS\b|\bSSL\b|证书/i.test(text)) kind = "TLS/证书相关";
+    else if (/\bDNS\b|cannot find host|resolve host|域名解析/i.test(text)) kind = "DNS/域名解析相关";
+    const parts = [];
+    if (domain) parts.push(domain[0] + (code ? " code=" + number : ""));
+    if (symbol) parts.push(symbol[0]);
+    if (kind) parts.push(kind);
+    return parts.length ? parts.join("；") : "未识别底层错误";
+  }
   function beijingDay(value) {
     const n = Date.parse(value);
     return Number.isFinite(n) ? Math.floor((n + 8 * 3600000) / DAY) : null;
@@ -64,16 +94,21 @@
     const options = { url: BASE + path, headers: headers, timeout: 15000,
       "auto-redirect": false, "auto-cookie": false, insecure: false };
     if (data !== undefined) { headers["Content-Type"] = "application/json"; options.body = JSON.stringify(data); }
+    const requestStarted = Date.now();
     return new Promise(function (resolve, reject) {
-      function error(code) { const e = new Error(code); e.safeCode = code; reject(e); }
+      function error(code, detail) {
+        const label = (path === "/api/auth/login" ? "登录 " : "") + method + " " + path + "：" + code +
+          "（耗时 " + Math.max(0, Date.now() - requestStarted) + "ms" + (detail ? "；" + networkInfo(detail) : "") + "）";
+        const e = new Error(label); e.safeCode = label; reject(e);
+      }
       try {
         $httpClient[method.toLowerCase()](options, function (err, response, body) {
-          if (err) return error("网络失败或超时");
+          if (err) return error("网络失败或超时", err);
           const status = Number(response && (response.status !== undefined ? response.status : response.statusCode));
           if (!Number.isInteger(status) || status < 100 || status > 599) return error("响应状态无效");
           resolve({ status: status, headers: response.headers || {}, body: body });
         });
-      } catch (_) { error("网络调用异常"); }
+      } catch (e) { error("网络调用异常", e); }
     });
   }
   function json(response) {
@@ -85,7 +120,7 @@
   }
   async function login(args) {
     const response = await http("POST", "/api/auth/login", { identifier: args.USERNAME, password: args.PASSWORD }, false);
-    if (response.status !== 200) fail("登录失败");
+    if (response.status !== 200) fail("登录失败 HTTP " + response.status);
     const value = json(response), next = session(response.headers);
     if (!value.user || value.user.id === undefined || !next) fail("登录未取得有效会话");
     store.save("cookie", next);
@@ -311,7 +346,7 @@
       } catch (e) { result.renew += "；释放运行锁失败：" + reason(e); }
     }
     const message = "签到：" + result.sign + "\n积分：" + result.coins + "\n到期：" + result.expiry + "\n续期：" + result.renew;
-    try { console.log("[ying-signin] " + message); $notification.post("Ying 签到与积分续期", "", message, { openUrl: BASE + "/account" }); }
+    try { console.log("[ying-signin " + VERSION + "] " + message); $notification.post("Ying 签到与积分续期", "", message, { openUrl: BASE + "/account" }); }
     finally { $done({}); }
   }
 })();
