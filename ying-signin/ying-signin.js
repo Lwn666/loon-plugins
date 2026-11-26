@@ -1,7 +1,7 @@
 /* ying-signin: Loon only. No credential capture; no external dependencies. */
 (async function () {
   "use strict";
-  const BASE = "https://ying.wedg.top", DAY = 86400000, VERSION = "2026.11.26.2";
+  const BASE = "https://ying.wedg.top", DAY = 86400000, VERSION = "2026.11.26.3";
   const started = Date.now(), today = Math.floor((started + 8 * 3600000) / DAY);
   const result = { sign: "未执行", coins: "未知", expiry: "未知", renew: "未执行" };
   let store, token, cookie = "", recovered = false;
@@ -95,21 +95,37 @@
       "auto-redirect": false, "auto-cookie": false, insecure: false };
     if (data !== undefined) { headers["Content-Type"] = "application/json"; options.body = JSON.stringify(data); }
     const requestStarted = Date.now();
-    return new Promise(function (resolve, reject) {
-      function error(code, detail) {
-        const label = (path === "/api/auth/login" ? "登录 " : "") + method + " " + path + "：" + code +
-          "（耗时 " + Math.max(0, Date.now() - requestStarted) + "ms" + (detail ? "；" + networkInfo(detail) : "") + "）";
-        const e = new Error(label); e.safeCode = label; reject(e);
+    // GET and the login POST are side-effect-free: one retry is safe.
+    // Check-in and redemption POSTs are never retried here.
+    const attempts = (method === "GET" || path === "/api/auth/login") ? 2 : 1;
+    function once(attempt) {
+      return new Promise(function (resolve, reject) {
+        function error(code, detail) {
+          const label = (path === "/api/auth/login" ? "登录 " : "") + method + " " + path + "：" + code +
+            (attempt > 1 ? "（第" + attempt + "次）" : "") +
+            "（耗时 " + Math.max(0, Date.now() - requestStarted) + "ms" + (detail ? "；" + networkInfo(detail) : "") + "）";
+          const e = new Error(label); e.safeCode = label; e.retryable = true; reject(e);
+        }
+        try {
+          $httpClient[method.toLowerCase()](options, function (err, response, body) {
+            if (err) return error("网络失败或超时", err);
+            const status = Number(response && (response.status !== undefined ? response.status : response.statusCode));
+            if (!Number.isInteger(status) || status < 100 || status > 599) return error("响应状态无效");
+            resolve({ status: status, headers: response.headers || {}, body: body });
+          });
+        } catch (e) { error("网络调用异常", e); }
+      });
+    }
+    return (async function () {
+      for (let attempt = 1; ; attempt++) {
+        try { return await once(attempt); }
+        catch (e) {
+          if (!e || e.retryable !== true || attempt >= attempts) throw e;
+          if (Date.now() - started > 140000) throw e;
+          await new Promise(function (r) { setTimeout(r, 700); });
+        }
       }
-      try {
-        $httpClient[method.toLowerCase()](options, function (err, response, body) {
-          if (err) return error("网络失败或超时", err);
-          const status = Number(response && (response.status !== undefined ? response.status : response.statusCode));
-          if (!Number.isInteger(status) || status < 100 || status > 599) return error("响应状态无效");
-          resolve({ status: status, headers: response.headers || {}, body: body });
-        });
-      } catch (e) { error("网络调用异常", e); }
-    });
+    })();
   }
   function json(response) {
     try {
