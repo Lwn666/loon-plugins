@@ -1,0 +1,18 @@
+#!name=Ying 签到与积分续期
+#!desc=账号密码登录 每日签到 积分会员续期；无需 MITM；本地缓存会话；兑换不确定时阻止重复扣费
+#!homepage=https://github.com/Lwn666/loon-plugins/blob/main/ying-signin/README.md
+#!icon=https://raw.githubusercontent.com/Lwn666/loon-plugins/main/icons/ying.png
+#!loon_version=3.5.1(983)
+#!category=Sign
+# 公开脚本不含凭据。不要将填写后的私人配置公开。
+# 勿同时运行 cron 与手动入口。账户密码只在本机参数填写。
+
+[Argument]
+USERNAME=input,"",tag=账号,desc=仅在本机填写账号或邮箱
+PASSWORD=input,"",tag=密码,desc=仅在本机填写密码 请勿分享填写后的配置
+AUTO_RENEW=switch,true,tag=自动积分续期,desc=剩余不足30天且满足积分条件时兑换会员天数
+CRONEXP=input,"10 8 * * *",tag=定时计划,desc=默认每天08:10执行 使用设备本地时区
+
+[Script]
+generic then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/ying-signin/ying-signin.js", {${USERNAME}, ${PASSWORD}, ${AUTO_RENEW}}) with tag="Ying 手动签到与续期", img_url="checkmark.circle", timeout=180
+cron ${CRONEXP} then script("https://raw.githubusercontent.com/Lwn666/loon-plugins/main/ying-signin/ying-signin.js", {${USERNAME}, ${PASSWORD}, ${AUTO_RENEW}}) with tag="Ying 定时签到与续期", timeout=180
