@@ -2,11 +2,11 @@
  * Readify 阅读签到 — 凭证自动捕获（http-request）
  *
  * Readify App（readifyapp.voiceclub.cn）的接口认证不是 Cookie，
- * 而是请求头里的 x-token（JWT，约 73 小时过期）+ x-user-id + x-device-id。
+ * 而是请求头里的 x-token（JWT，实测 7.33 天有效）+ x-user-id + x-device-id。
  * 打开 App 任意页面（书架/首页/签到页）都会带这些头，自动抓取并存本机。
  *
  * 关键头（来自抓包）：
- *   x-token          JWT（type=LOGIN，exp 约 73h）
+ *   x-token          JWT（type=LOGIN，exp − iat = 633600s ≈ 7.33 天）
  *   x-user-id        bac66627-...（用户 UUID）
  *   x-device-id      590E17D7-...（设备 UUID）
  *   其余（x-lang/x-os/x-time-zone/x-client-region/...）一并抓取做兜底。
@@ -128,7 +128,7 @@ function main() {
     var notice = getEnv("notice");
     var noticeOn = notice === "" ? true : !(notice === "false" || notice === "0");
     if (noticeOn) {
-      $notification.post("Readify 签到", "凭证已自动更新 ✓", "打开 App 已刷新 token\n有效期约 3 天，到期前记得再打开一次");
+      $notification.post("Readify 签到", "凭证已自动更新 ✓", "打开 App 已刷新 token\n有效期约 7 天，到期前记得再打开一次");
     }
   }
   $done({});

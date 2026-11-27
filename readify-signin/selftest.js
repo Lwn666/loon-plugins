@@ -17,7 +17,7 @@ function envOr(name, fallback) {
 }
 
 // ---- 读取抓包里的真实凭证（或环境变量覆盖）----
-const capDir = "/var/minis/workspace/readify/6469_7603_1793440374462";
+const capDir = envOr("READIFY_CAP_DIR", "/var/minis/workspace/readsignin-capture/149_216_1795788396473");
 function hget(file, name) {
   const txt = fs.readFileSync(file, "utf8");
   const lines = txt.split(/\r?\n/);
@@ -59,7 +59,11 @@ global.$notification = {
     console.log("===================\n");
   },
 };
-global.$done = () => {};
+global.$done = () => {
+  console.log("\n=== 请求清单 ===");
+  REQS.forEach((r) => console.log("  " + r));
+  console.log("POST 请求数: " + REQS.filter((r) => r.startsWith("POST")).length);
+};
 global.$argument = JSON.stringify({ CAMPAIGN_ID: "reading-streak-7d-202607", DEBUG: "true" });
 
 // ---- mock $httpClient（真实 https 请求）----
@@ -89,9 +93,10 @@ function realHttp(opts, method, cb) {
   if (payload) req.write(payload);
   req.end();
 }
+const REQS = [];
 global.$httpClient = {
-  get: (o, cb) => realHttp(o, "GET", cb),
-  post: (o, cb) => realHttp(o, "POST", cb),
+  get: (o, cb) => { REQS.push("GET " + o.url.replace(/^https?:\/\/[^/]+/, "").split("?")[0]); realHttp(o, "GET", cb); },
+  post: (o, cb) => { REQS.push("POST " + o.url.replace(/^https?:\/\/[^/]+/, "").split("?")[0]); realHttp(o, "POST", cb); },
 };
 
 // ---- 加载并运行真实脚本 ----
