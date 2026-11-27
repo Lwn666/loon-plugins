@@ -313,7 +313,12 @@ function afterStatus(d) {
     R.extra.push("活动状态：" + (d.activityStatus || "-") + "（不可签到）");
     return afterCheckin(d);
   }
-  if (!canCheckIn) return afterCheckin(d);
+  if (!canCheckIn) {
+    if (d.streakedToday !== true && d.canClaim !== true) {
+      R.extra.push("今日不可签到：roundStatus=" + (d.roundStatus || "-") + "（可能中断或需明日再来）");
+    }
+    return afterCheckin(d);
+  }
 
   log("#### 执行签到");
   req("POST", "/api/campaigns/streaks", JSON.stringify({ campaignId: R.campaignId }), function (err, resp, raw) {
